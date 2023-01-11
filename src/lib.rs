@@ -12,7 +12,7 @@ pub mod supervision {
         ExponentialBackoffStrategy, FixedIntervalStrategy, NoIntervalStrategy,
     };
 }
-pub use bus::{EventBus, EventReceiver};
-pub use system::{ActorSystem, SystemEvent};
+pub use bus::EventReceiver;
+pub use system::ActorSystem;
 
 pub use async_trait::async_trait;

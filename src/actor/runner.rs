@@ -1,18 +1,18 @@
-use crate::system::{ActorSystem, SystemEvent};
+use crate::system::ActorSystem;
 
 use super::{
     handler::{ActorMailbox, MailboxReceiver},
     Actor, ActorContext, ActorPath, ActorRef, SupervisionStrategy,
 };
 
-pub(crate) struct ActorRunner<E: SystemEvent, A: Actor<E>> {
+pub(crate) struct ActorRunner<A: Actor> {
     path: ActorPath,
     actor: A,
-    receiver: MailboxReceiver<E, A>,
+    receiver: MailboxReceiver<A>,
 }
 
-impl<E: SystemEvent, A: Actor<E>> ActorRunner<E, A> {
-    pub fn create(path: ActorPath, actor: A) -> (Self, ActorRef<E, A>) {
+impl<A: Actor> ActorRunner<A> {
+    pub fn create(path: ActorPath, actor: A) -> (Self, ActorRef<A>) {
         let (sender, receiver) = ActorMailbox::create();
         let actor_ref = ActorRef::new(path.clone(), sender);
         let runner = ActorRunner {
@@ -23,7 +23,7 @@ impl<E: SystemEvent, A: Actor<E>> ActorRunner<E, A> {
         (runner, actor_ref)
     }
 
-    pub async fn start(&mut self, system: ActorSystem<E>) {
+    pub async fn start(&mut self, system: ActorSystem) {
         log::debug!("Starting actor '{}'...", &self.path);
 
         let mut ctx = ActorContext {
@@ -84,28 +84,25 @@ mod tests {
     #[derive(Clone, Debug)]
     struct TestEvent(String);
 
-    impl SystemEvent for TestEvent {}
-
     #[derive(Clone)]
     struct NoRetryActor;
 
     #[async_trait]
-    impl Actor<TestEvent> for NoRetryActor {
-        async fn pre_start(&mut self, ctx: &mut ActorContext<TestEvent>) -> Result<(), ActorError> {
+    impl Actor for NoRetryActor {
+        async fn pre_start(&mut self, ctx: &mut ActorContext) -> Result<(), ActorError> {
             log::info!("Starting '{}'...", ctx.path);
             let error = std::io::Error::new(std::io::ErrorKind::Interrupted, "Some error");
             Err(ActorError::new(error))
         }
     }
 
-    fn start_system() -> ActorSystem<TestEvent> {
+    fn start_system() -> ActorSystem {
         if std::env::var("RUST_LOG").is_err() {
             std::env::set_var("RUST_LOG", "trace");
         }
         let _ = env_logger::builder().is_test(true).try_init();
 
-        let bus = EventBus::<TestEvent>::new(1000);
-        ActorSystem::new("test", bus)
+        ActorSystem::new("test")
     }
 
     #[tokio::test]
@@ -126,13 +123,13 @@ mod tests {
     }
 
     #[async_trait]
-    impl Actor<TestEvent> for RetryNoIntervalActor {
+    impl Actor for RetryNoIntervalActor {
         fn supervision_strategy() -> SupervisionStrategy {
             let strategy = supervision::NoIntervalStrategy::new(5);
             SupervisionStrategy::Retry(Box::new(strategy))
         }
 
-        async fn pre_start(&mut self, ctx: &mut ActorContext<TestEvent>) -> Result<(), ActorError> {
+        async fn pre_start(&mut self, ctx: &mut ActorContext) -> Result<(), ActorError> {
             log::info!("Actor '{}' started.", ctx.path);
             self.counter += 1;
             log::info!("Counter is now {}", self.counter);
@@ -142,7 +139,7 @@ mod tests {
 
         async fn pre_restart(
             &mut self,
-            ctx: &mut ActorContext<TestEvent>,
+            ctx: &mut ActorContext,
             error: Option<&ActorError>,
         ) -> Result<(), ActorError> {
             log::info!(
@@ -176,13 +173,13 @@ mod tests {
     }
 
     #[async_trait]
-    impl Actor<TestEvent> for RetryExpBackoffActor {
+    impl Actor for RetryExpBackoffActor {
         fn supervision_strategy() -> SupervisionStrategy {
             let strategy = supervision::ExponentialBackoffStrategy::new(5);
             SupervisionStrategy::Retry(Box::new(strategy))
         }
 
-        async fn pre_start(&mut self, ctx: &mut ActorContext<TestEvent>) -> Result<(), ActorError> {
+        async fn pre_start(&mut self, ctx: &mut ActorContext) -> Result<(), ActorError> {
             log::info!("Actor '{}' started.", ctx.path);
             let error = std::io::Error::new(std::io::ErrorKind::Interrupted, "Some error");
             Err(ActorError::new(error))
@@ -190,7 +187,7 @@ mod tests {
 
         async fn pre_restart(
             &mut self,
-            ctx: &mut ActorContext<TestEvent>,
+            ctx: &mut ActorContext,
             error: Option<&ActorError>,
         ) -> Result<(), ActorError> {
             log::info!("Actor '{}' is restarting due to {:#?}.", ctx.path, error);

@@ -12,32 +12,32 @@ pub use path::ActorPath;
 
 use supervision::SupervisionStrategy;
 
-use crate::system::{ActorSystem, SystemEvent};
+use crate::system::ActorSystem;
 
 /// The actor context gives a running actor access to its path, as well as the system that
 /// is running it.
-pub struct ActorContext<E: SystemEvent> {
+pub struct ActorContext {
     pub path: ActorPath,
-    pub system: ActorSystem<E>,
+    pub system: ActorSystem,
 }
 
 pub trait Receiver {
     fn receive(&self, message: dyn Any);
 }
 
-impl<E: SystemEvent> ActorContext<E> {
+impl ActorContext {
     /// Create a child actor under this actor.
-    pub async fn create_child<A: Actor<E>>(
+    pub async fn create_child<A: Actor>(
         &self,
         name: &str,
         actor: A,
-    ) -> Result<ActorRef<E, A>, ActorError> {
+    ) -> Result<ActorRef<A>, ActorError> {
         let path = self.path.clone() / name;
         self.system.create_actor_path(path, actor).await
     }
 
     /// Retrieve a child actor running under this actor.
-    pub async fn get_child<A: Actor<E>>(&self, name: &str) -> Option<ActorRef<E, A>> {
+    pub async fn get_child<A: Actor>(&self, name: &str) -> Option<ActorRef<A>> {
         let path = self.path.clone() / name;
         self.system.get_actor(&path).await
     }
@@ -47,9 +47,9 @@ impl<E: SystemEvent> ActorContext<E> {
         &self,
         name: &str,
         actor_fn: F,
-    ) -> Result<ActorRef<E, A>, ActorError>
+    ) -> Result<ActorRef<A>, ActorError>
     where
-        A: Actor<E>,
+        A: Actor,
         F: FnOnce() -> A,
     {
         let path = self.path.clone() / name;
@@ -68,7 +68,7 @@ impl<E: SystemEvent> ActorContext<E> {
         error: Option<&ActorError>,
     ) -> Result<(), ActorError>
     where
-        A: Actor<E>,
+        A: Actor,
     {
         actor.pre_restart(self, error).await
     }
@@ -83,12 +83,12 @@ pub trait Message: Clone + Send + Sync + 'static {
 
 /// Defines what the actor does with a message.
 #[async_trait]
-pub trait Handler<E: SystemEvent, M: Message>: Send + Sync {
-    async fn handle(&mut self, msg: M, ctx: &mut ActorContext<E>) -> M::Response;
+pub trait Handler<M: Message>: Send + Sync {
+    async fn handle(&mut self, msg: M, ctx: &mut ActorContext) -> M::Response;
 }
 
 #[async_trait]
-pub trait Actor<E: SystemEvent>: Send + Sync + 'static {
+pub trait Actor: Send + Sync + 'static {
     /// Defines the supervision strategy to use for this actor. By default it is
     /// `Stop` which simply stops the actor if an error occurs at startup. You
     /// can also set this to [`SupervisionStrategy::Retry`] with a chosen
@@ -98,7 +98,7 @@ pub trait Actor<E: SystemEvent>: Send + Sync + 'static {
     }
 
     /// Override this function if you like to perform initialization of the actor
-    async fn pre_start(&mut self, _ctx: &mut ActorContext<E>) -> Result<(), ActorError> {
+    async fn pre_start(&mut self, _ctx: &mut ActorContext) -> Result<(), ActorError> {
         Ok(())
     }
 
@@ -108,24 +108,24 @@ pub trait Actor<E: SystemEvent>: Send + Sync + 'static {
     /// in some other way.
     async fn pre_restart(
         &mut self,
-        ctx: &mut ActorContext<E>,
+        ctx: &mut ActorContext,
         _error: Option<&ActorError>,
     ) -> Result<(), ActorError> {
         self.pre_start(ctx).await
     }
 
     /// Override this function if you like to perform work when the actor is stopped
-    async fn post_stop(&mut self, _ctx: &mut ActorContext<E>) {}
+    async fn post_stop(&mut self, _ctx: &mut ActorContext) {}
 }
 
 /// A clonable actor reference. It basically holds a Sender that can send messages
 /// to the mailbox (receiver) of the actor.
-pub struct ActorRef<E: SystemEvent, A: Actor<E>> {
+pub struct ActorRef<A: Actor> {
     path: ActorPath,
-    sender: handler::HandlerRef<E, A>,
+    sender: handler::HandlerRef<A>,
 }
 
-impl<E: SystemEvent, A: Actor<E>> Clone for ActorRef<E, A> {
+impl<A: Actor> Clone for ActorRef<A> {
     fn clone(&self) -> Self {
         Self {
             path: self.path.clone(),
@@ -134,7 +134,7 @@ impl<E: SystemEvent, A: Actor<E>> Clone for ActorRef<E, A> {
     }
 }
 
-impl<E: SystemEvent, A: Actor<E>> ActorRef<E, A> {
+impl<A: Actor> ActorRef<A> {
     /// Get the path of this actor
     pub fn path(&self) -> &ActorPath {
         &self.path
@@ -150,7 +150,7 @@ impl<E: SystemEvent, A: Actor<E>> ActorRef<E, A> {
     pub fn tell<M>(&self, msg: M) -> Result<(), ActorError>
     where
         M: Message,
-        A: Handler<E, M>,
+        A: Handler<M>,
     {
         self.sender.tell(msg)
     }
@@ -159,7 +159,7 @@ impl<E: SystemEvent, A: Actor<E>> ActorRef<E, A> {
     pub async fn ask<M>(&self, msg: M) -> Result<M::Response, ActorError>
     where
         M: Message,
-        A: Handler<E, M>,
+        A: Handler<M>,
     {
         self.sender.ask(msg).await
     }
@@ -170,7 +170,7 @@ impl<E: SystemEvent, A: Actor<E>> ActorRef<E, A> {
         self.sender.is_closed()
     }
 
-    pub(crate) fn new(path: ActorPath, sender: handler::MailboxSender<E, A>) -> Self {
+    pub(crate) fn new(path: ActorPath, sender: handler::MailboxSender<A>) -> Self {
         let handler = handler::HandlerRef::new(sender);
         ActorRef {
             path,
@@ -179,7 +179,7 @@ impl<E: SystemEvent, A: Actor<E>> ActorRef<E, A> {
     }
 }
 
-impl<E: SystemEvent, A: Actor<E>> std::fmt::Debug for ActorRef<E, A> {
+impl<A: Actor> std::fmt::Debug for ActorRef<A> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.path)
     }
