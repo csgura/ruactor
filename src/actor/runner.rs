@@ -1,18 +1,18 @@
-use crate::system::ActorSystem;
+use crate::system::{ActorSystem, Prop};
 
 use super::{
     handler::{ActorMailbox, MailboxReceiver},
     Actor, ActorContext, ActorPath, ActorRef, SupervisionStrategy,
 };
 
-pub(crate) struct ActorRunner<A: Actor> {
+pub(crate) struct ActorRunner<A: Actor, P: Prop<A>> {
     path: ActorPath,
-    actor: A,
+    actor: P,
     receiver: MailboxReceiver<A>,
 }
 
-impl<A: Actor> ActorRunner<A> {
-    pub fn create(path: ActorPath, actor: A) -> (Self, ActorRef<A>) {
+impl<A: Actor, P: Prop<A>> ActorRunner<A, P> {
+    pub fn create(path: ActorPath, actor: P) -> (Self, ActorRef<A>) {
         let (sender, receiver) = ActorMailbox::create();
         let actor_ref = ActorRef::new(path.clone(), sender);
         let runner = ActorRunner {
@@ -31,7 +31,9 @@ impl<A: Actor> ActorRunner<A> {
             system,
         };
 
-        let mut start_error = self.actor.pre_start(&mut ctx).await.err();
+        let mut actor = self.actor.create();
+
+        let mut start_error = actor.pre_start(&mut ctx).await.err();
         if start_error.is_some() {
             let mut retries = 0;
             match A::supervision_strategy() {
@@ -50,10 +52,7 @@ impl<A: Actor> ActorRunner<A> {
                             tokio::time::sleep(duration).await;
                         }
                         retries += 1;
-                        start_error = ctx
-                            .restart(&mut self.actor, start_error.as_ref())
-                            .await
-                            .err();
+                        start_error = ctx.restart(&mut actor, start_error.as_ref()).await.err();
                     }
                 }
             }
@@ -62,10 +61,10 @@ impl<A: Actor> ActorRunner<A> {
         if start_error.is_none() {
             log::debug!("Actor '{}' has started successfully.", &self.path);
             while let Some(mut msg) = self.receiver.recv().await {
-                msg.handle(&mut self.actor, &mut ctx).await;
+                msg.handle(&mut actor, &mut ctx).await;
             }
 
-            self.actor.post_stop(&mut ctx).await;
+            actor.post_stop(&mut ctx).await;
 
             log::debug!("Actor '{}' stopped.", &self.path);
         }
@@ -110,7 +109,7 @@ mod tests {
         let system = start_system();
         let path = ActorPath::from("/test/actor");
         let actor = NoRetryActor;
-        let (mut runner, actor_ref) = ActorRunner::create(path, actor);
+        let (mut runner, actor_ref) = ActorRunner::create(path, || NoRetryActor);
 
         runner.start(system).await;
 
@@ -159,8 +158,7 @@ mod tests {
     async fn retry_no_interval_strategy() {
         let system = start_system();
         let path = ActorPath::from("/test/actor");
-        let actor = RetryNoIntervalActor::default();
-        let (mut runner, actor_ref) = ActorRunner::create(path, actor);
+        let (mut runner, actor_ref) = ActorRunner::create(path, || RetryNoIntervalActor::default());
 
         runner.start(system).await;
 
@@ -202,8 +200,8 @@ mod tests {
     async fn retry_exponetial_backoff_strategy() {
         let system = start_system();
         let path = ActorPath::from("/test/actor");
-        let actor = RetryExpBackoffActor { counter: 0 };
-        let (mut runner, actor_ref) = ActorRunner::create(path, actor);
+        let (mut runner, actor_ref) =
+            ActorRunner::create(path, || RetryExpBackoffActor { counter: 0 });
 
         runner.start(system).await;
 

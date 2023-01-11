@@ -10,6 +10,29 @@ use crate::{
 
 /// Events that this actor system will send
 
+pub trait Prop<A: Actor> {
+    fn create(&self) -> A;
+}
+
+// impl<A> Prop<A> for A
+// where
+//     A: Clone + Actor,
+// {
+//     fn create(&self) -> A {
+//         self.clone()
+//     }
+// }
+
+impl<A, F> Prop<A> for F
+where
+    A: Actor,
+    F: Fn() -> A,
+{
+    fn create(&self) -> A {
+        self()
+    }
+}
+
 #[derive(Clone)]
 pub struct ActorSystem {
     name: String,
@@ -31,10 +54,10 @@ impl ActorSystem {
             .and_then(|any| any.downcast_ref::<ActorRef<A>>().cloned())
     }
 
-    pub(crate) async fn create_actor_path<A: Actor>(
+    pub(crate) async fn create_actor_path<A: Actor, P: Prop<A> + Send + 'static>(
         &self,
         path: ActorPath,
-        actor: A,
+        actor: P,
     ) -> Result<ActorRef<A>, ActorError> {
         log::debug!("Creating actor '{}' on system '{}'...", &path, &self.name);
 
@@ -59,10 +82,10 @@ impl ActorSystem {
 
     /// Launches a new top level actor on this actor system at the '/user' actor path. If another actor with
     /// the same name already exists, an `Err(ActorError::Exists(ActorPath))` is returned instead.
-    pub async fn create_actor<A: Actor>(
+    pub async fn create_actor<A: Actor, P: Prop<A> + Send + 'static>(
         &self,
         name: &str,
-        actor: A,
+        actor: P,
     ) -> Result<ActorRef<A>, ActorError> {
         let path = ActorPath::from("/user") / name;
         self.create_actor_path(path, actor).await
@@ -76,7 +99,7 @@ impl ActorSystem {
     ) -> Result<ActorRef<A>, ActorError>
     where
         A: Actor,
-        F: FnOnce() -> A,
+        F: Prop<A> + Send + 'static,
     {
         let path = ActorPath::from("/user") / name;
         self.get_or_create_actor_path(&path, actor_fn).await
@@ -89,14 +112,14 @@ impl ActorSystem {
     ) -> Result<ActorRef<A>, ActorError>
     where
         A: Actor,
-        F: FnOnce() -> A,
+        F: Prop<A> + Send + 'static,
     {
         let actors = self.actors.read().await;
         match self.get_actor(path).await {
             Some(actor) => Ok(actor),
             None => {
                 drop(actors);
-                self.create_actor_path(path.clone(), actor_fn()).await
+                self.create_actor_path(path.clone(), actor_fn).await
             }
         }
     }
@@ -141,7 +164,7 @@ mod tests {
     #[derive(Clone, Debug)]
     struct TestEvent(String);
 
-    #[derive(Default)]
+    #[derive(Default, Clone)]
     struct TestActor {
         counter: usize,
     }
@@ -187,8 +210,10 @@ mod tests {
     impl Actor for OtherActor {
         async fn pre_start(&mut self, ctx: &mut ActorContext) -> Result<(), ActorError> {
             log::debug!("OtherActor initial message: {}", &self.message);
-            let child = TestActor { counter: 0 };
-            self.child = ctx.create_child("child", child).await.ok();
+            self.child = ctx
+                .create_child("child", || TestActor { counter: 0 })
+                .await
+                .ok();
             Ok(())
         }
 
@@ -224,11 +249,13 @@ mod tests {
         }
         let _ = env_logger::builder().is_test(true).try_init();
 
-        let actor = TestActor { counter: 0 };
         let msg = TestMessage(10);
 
         let system = ActorSystem::new("test");
-        let actor_ref = system.create_actor("test-actor", actor).await.unwrap();
+        let actor_ref = system
+            .create_actor("test-actor", || TestActor { counter: 0 })
+            .await
+            .unwrap();
         let result = actor_ref.ask(msg).await.unwrap();
 
         assert_eq!(result, 1);
@@ -238,9 +265,9 @@ mod tests {
     #[error("custom error")]
     struct CustomError(String);
 
-    fn create_other(message: String) -> OtherActor {
+    fn create_other(message: &String) -> OtherActor {
         OtherActor {
-            message,
+            message: message.clone(),
             child: None,
         }
     }
@@ -255,7 +282,7 @@ mod tests {
         let system = ActorSystem::new("test");
 
         let initial_message = "hello world!".to_string();
-        let actor_fn = || create_other(initial_message);
+        let actor_fn = move || create_other(&initial_message);
         let actor_ref = system
             .get_or_create_actor("test-actor", actor_fn)
             .await
@@ -274,13 +301,15 @@ mod tests {
         }
         let _ = env_logger::builder().is_test(true).try_init();
 
-        let actor = TestActor { counter: 0 };
         let msg = TestMessage(10);
 
         let system = ActorSystem::new("test");
 
         {
-            let actor_ref = system.create_actor("test-actor", actor).await.unwrap();
+            let actor_ref = system
+                .create_actor("test-actor", || TestActor { counter: 0 })
+                .await
+                .unwrap();
             let result = actor_ref.ask(msg).await.unwrap();
 
             assert_eq!(result, 1);
@@ -298,11 +327,13 @@ mod tests {
         }
         let _ = env_logger::builder().is_test(true).try_init();
 
-        let actor = TestActor { counter: 0 };
         let msg = TestMessage(10);
 
         let system = ActorSystem::new("test");
-        let actor_ref = system.create_actor("test-actor", actor).await.unwrap();
+        let actor_ref = system
+            .create_actor("test-actor", || TestActor { counter: 0 })
+            .await
+            .unwrap();
 
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
@@ -318,10 +349,11 @@ mod tests {
         }
         let _ = env_logger::builder().is_test(true).try_init();
 
-        let actor = TestActor { counter: 0 };
-
         let system = ActorSystem::new("test");
-        let original = system.create_actor("test-actor", actor).await.unwrap();
+        let original = system
+            .create_actor("test-actor", || TestActor { counter: 0 })
+            .await
+            .unwrap();
 
         if let Some(actor_ref) = system.get_actor::<TestActor>(original.path()).await {
             let msg = TestMessage(10);
@@ -348,15 +380,16 @@ mod tests {
         }
         let _ = env_logger::builder().is_test(true).try_init();
 
-        let actor = OtherActor {
-            message: "Initial".to_string(),
-            child: None,
-        };
-
         let system = ActorSystem::new("test");
 
         {
-            let actor_ref = system.create_actor("test-actor", actor).await.unwrap();
+            let actor_ref = system
+                .create_actor("test-actor", || OtherActor {
+                    message: "Initial".to_string(),
+                    child: None,
+                })
+                .await
+                .unwrap();
             let msg = OtherMessage("new message!".to_string());
             let result = actor_ref.ask(msg).await.unwrap();
             assert_eq!(result, "new message!".to_string());

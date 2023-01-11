@@ -12,7 +12,7 @@ pub use path::ActorPath;
 
 use supervision::SupervisionStrategy;
 
-use crate::system::ActorSystem;
+use crate::system::{ActorSystem, Prop};
 
 /// The actor context gives a running actor access to its path, as well as the system that
 /// is running it.
@@ -21,16 +21,12 @@ pub struct ActorContext {
     pub system: ActorSystem,
 }
 
-pub trait Receiver {
-    fn receive(&self, message: dyn Any);
-}
-
 impl ActorContext {
     /// Create a child actor under this actor.
-    pub async fn create_child<A: Actor>(
+    pub async fn create_child<A: Actor, P: Prop<A> + Send + 'static>(
         &self,
         name: &str,
-        actor: A,
+        actor: P,
     ) -> Result<ActorRef<A>, ActorError> {
         let path = self.path.clone() / name;
         self.system.create_actor_path(path, actor).await
@@ -50,7 +46,7 @@ impl ActorContext {
     ) -> Result<ActorRef<A>, ActorError>
     where
         A: Actor,
-        F: FnOnce() -> A,
+        F: Prop<A> + Send + 'static,
     {
         let path = self.path.clone() / name;
         self.system.get_or_create_actor_path(&path, actor_fn).await
