@@ -1,4 +1,9 @@
-use crate::system::{ActorSystem, Prop};
+use std::sync::Arc;
+
+use crate::{
+    system::{ActorSystem, Prop},
+    ActorError,
+};
 
 use super::{
     handler::{ActorMailbox, MailboxReceiver},
@@ -8,12 +13,12 @@ use super::{
 pub(crate) struct ActorRunner<A: Actor, P: Prop<A>> {
     path: ActorPath,
     actor: P,
-    receiver: MailboxReceiver<A>,
+    receiver: MailboxReceiver<A::UserMessageType>,
 }
 
 impl<A: Actor, P: Prop<A>> ActorRunner<A, P> {
-    pub fn create(path: ActorPath, actor: P) -> (Self, ActorRef<A>) {
-        let (sender, receiver) = ActorMailbox::create();
+    pub fn create(path: ActorPath, actor: P) -> (Self, ActorRef<A::UserMessageType>) {
+        let (sender, receiver) = ActorMailbox::<A::UserMessageType>::create();
         let actor_ref = ActorRef::new(path.clone(), sender);
         let runner = ActorRunner {
             path,
@@ -23,15 +28,24 @@ impl<A: Actor, P: Prop<A>> ActorRunner<A, P> {
         (runner, actor_ref)
     }
 
+    async fn restart(
+        context: &mut ActorContext<A::UserMessageType>,
+        actor: &mut A,
+        error: Option<&ActorError>,
+    ) -> Result<(), ActorError> {
+        actor.pre_restart(context, error).await
+    }
+
     pub async fn start(&mut self, system: ActorSystem) {
         log::debug!("Starting actor '{}'...", &self.path);
 
-        let mut ctx = ActorContext {
+        let mut actor = self.actor.create();
+
+        let mut ctx: ActorContext<A::UserMessageType> = ActorContext {
             path: self.path.clone(),
             system,
+            receiver: Arc::from(actor.create_receive()),
         };
-
-        let mut actor = self.actor.create();
 
         let mut start_error = actor.pre_start(&mut ctx).await.err();
         if start_error.is_some() {
@@ -52,7 +66,9 @@ impl<A: Actor, P: Prop<A>> ActorRunner<A, P> {
                             tokio::time::sleep(duration).await;
                         }
                         retries += 1;
-                        start_error = ctx.restart(&mut actor, start_error.as_ref()).await.err();
+                        start_error = Self::restart(&mut ctx, &mut actor, start_error.as_ref())
+                            .await
+                            .err();
                     }
                 }
             }
@@ -60,8 +76,12 @@ impl<A: Actor, P: Prop<A>> ActorRunner<A, P> {
 
         if start_error.is_none() {
             log::debug!("Actor '{}' has started successfully.", &self.path);
-            while let Some(mut msg) = self.receiver.recv().await {
-                msg.handle(&mut actor, &mut ctx).await;
+
+            while let Some(msg) = self.receiver.recv().await {
+                let r = ctx.receiver.clone();
+
+                r.receive(&mut ctx, msg).await;
+                //msg.handle(&mut actor, &mut ctx).await;
             }
 
             actor.post_stop(&mut ctx).await;
@@ -88,7 +108,9 @@ mod tests {
 
     #[async_trait]
     impl Actor for NoRetryActor {
-        async fn pre_start(&mut self, ctx: &mut ActorContext) -> Result<(), ActorError> {
+        type UserMessageType = TestEvent;
+
+        async fn pre_start(&mut self, ctx: &mut ActorContext<TestEvent>) -> Result<(), ActorError> {
             log::info!("Starting '{}'...", ctx.path);
             let error = std::io::Error::new(std::io::ErrorKind::Interrupted, "Some error");
             Err(ActorError::new(error))
@@ -123,12 +145,14 @@ mod tests {
 
     #[async_trait]
     impl Actor for RetryNoIntervalActor {
+        type UserMessageType = TestEvent;
+
         fn supervision_strategy() -> SupervisionStrategy {
             let strategy = supervision::NoIntervalStrategy::new(5);
             SupervisionStrategy::Retry(Box::new(strategy))
         }
 
-        async fn pre_start(&mut self, ctx: &mut ActorContext) -> Result<(), ActorError> {
+        async fn pre_start(&mut self, ctx: &mut ActorContext<TestEvent>) -> Result<(), ActorError> {
             log::info!("Actor '{}' started.", ctx.path);
             self.counter += 1;
             log::info!("Counter is now {}", self.counter);
@@ -138,7 +162,7 @@ mod tests {
 
         async fn pre_restart(
             &mut self,
-            ctx: &mut ActorContext,
+            ctx: &mut ActorContext<TestEvent>,
             error: Option<&ActorError>,
         ) -> Result<(), ActorError> {
             log::info!(
@@ -172,12 +196,14 @@ mod tests {
 
     #[async_trait]
     impl Actor for RetryExpBackoffActor {
+        type UserMessageType = TestEvent;
+
         fn supervision_strategy() -> SupervisionStrategy {
             let strategy = supervision::ExponentialBackoffStrategy::new(5);
             SupervisionStrategy::Retry(Box::new(strategy))
         }
 
-        async fn pre_start(&mut self, ctx: &mut ActorContext) -> Result<(), ActorError> {
+        async fn pre_start(&mut self, ctx: &mut ActorContext<TestEvent>) -> Result<(), ActorError> {
             log::info!("Actor '{}' started.", ctx.path);
             let error = std::io::Error::new(std::io::ErrorKind::Interrupted, "Some error");
             Err(ActorError::new(error))
@@ -185,7 +211,7 @@ mod tests {
 
         async fn pre_restart(
             &mut self,
-            ctx: &mut ActorContext,
+            ctx: &mut ActorContext<TestEvent>,
             error: Option<&ActorError>,
         ) -> Result<(), ActorError> {
             log::info!("Actor '{}' is restarting due to {:#?}.", ctx.path, error);

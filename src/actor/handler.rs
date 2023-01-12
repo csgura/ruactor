@@ -3,82 +3,34 @@ use std::marker::PhantomData;
 use async_trait::async_trait;
 use tokio::sync::{mpsc, oneshot};
 
-use crate::actor::{ActorContext, Handler, Message};
+use crate::{
+    actor::{ActorContext, Handler, Request},
+    ActorRef,
+};
 
-use super::{Actor, ActorError};
+use super::{Actor, ActorError, Message};
 
-#[async_trait]
-pub trait MessageHandler<A: Actor>: Send + Sync {
-    async fn handle(&mut self, actor: &mut A, ctx: &mut ActorContext);
-}
+pub type MailboxReceiver<T> = mpsc::UnboundedReceiver<Message<T>>;
+pub type MailboxSender<T> = mpsc::UnboundedSender<Message<T>>;
 
-struct ActorMessage<M, A>
-where
-    M: Message,
-    A: Actor + Handler<M>,
-{
-    payload: M,
-    rsvp: Option<oneshot::Sender<M::Response>>,
+pub struct ActorMailbox<A> {
     _phantom_actor: PhantomData<A>,
 }
 
-#[async_trait]
-impl<M, A> MessageHandler<A> for ActorMessage<M, A>
-where
-    M: Message,
-
-    A: Actor + Handler<M>,
-{
-    async fn handle(&mut self, actor: &mut A, ctx: &mut ActorContext) {
-        self.process(actor, ctx).await
-    }
-}
-
-impl<M, A> ActorMessage<M, A>
-where
-    M: Message,
-
-    A: Actor + Handler<M>,
-{
-    async fn process(&mut self, actor: &mut A, ctx: &mut ActorContext) {
-        let result = actor.handle(self.payload.clone(), ctx).await;
-
-        if let Some(rsvp) = std::mem::replace(&mut self.rsvp, None) {
-            rsvp.send(result).unwrap_or_else(|_failed| {
-                log::error!("Failed to send back response!");
-            })
-        }
-    }
-
-    pub fn new(msg: M, rsvp: Option<oneshot::Sender<M::Response>>) -> Self {
-        ActorMessage {
-            payload: msg,
-            rsvp,
-            _phantom_actor: PhantomData,
-        }
-    }
-}
-
-pub type MailboxReceiver<A> = mpsc::UnboundedReceiver<BoxedMessageHandler<A>>;
-pub type MailboxSender<A> = mpsc::UnboundedSender<BoxedMessageHandler<A>>;
-
-pub struct ActorMailbox<A: Actor> {
-    _phantom_actor: PhantomData<A>,
-}
-
-impl<A: Actor> ActorMailbox<A> {
-    pub fn create() -> (MailboxSender<A>, MailboxReceiver<A>) {
+impl<T: Send + Sync> ActorMailbox<T> {
+    pub fn create() -> (MailboxSender<T>, MailboxReceiver<T>) {
         mpsc::unbounded_channel()
     }
 }
 
-pub type BoxedMessageHandler<A> = Box<dyn MessageHandler<A>>;
-
-pub struct HandlerRef<A: Actor> {
-    sender: mpsc::UnboundedSender<BoxedMessageHandler<A>>,
+pub struct HandlerRef<T: Send + Sync> {
+    sender: mpsc::UnboundedSender<Message<T>>,
 }
 
-impl<A: Actor> Clone for HandlerRef<A> {
+impl<T> Clone for HandlerRef<T>
+where
+    T: Send + Sync,
+{
     fn clone(&self) -> Self {
         Self {
             sender: self.sender.clone(),
@@ -86,18 +38,17 @@ impl<A: Actor> Clone for HandlerRef<A> {
     }
 }
 
-impl<A: Actor> HandlerRef<A> {
-    pub(crate) fn new(sender: mpsc::UnboundedSender<BoxedMessageHandler<A>>) -> Self {
+impl<T> HandlerRef<T>
+where
+    T: Send + Sync,
+{
+    pub(crate) fn new(sender: mpsc::UnboundedSender<Message<T>>) -> Self {
         HandlerRef { sender }
     }
 
-    pub fn tell<M>(&self, msg: M) -> Result<(), ActorError>
-    where
-        M: Message,
-        A: Handler<M>,
-    {
-        let message = ActorMessage::<M, A>::new(msg, None);
-        if let Err(error) = self.sender.send(Box::new(message)) {
+    pub fn tell(&self, msg: Message<T>) -> Result<(), ActorError> {
+        //let message = ActorMessage::<M, A>::new(msg, None);
+        if let Err(error) = self.sender.send(msg) {
             log::error!("Failed to tell message! {}", error.to_string());
             Err(ActorError::SendError(error.to_string()))
         } else {
@@ -105,22 +56,24 @@ impl<A: Actor> HandlerRef<A> {
         }
     }
 
-    pub async fn ask<M>(&self, msg: M) -> Result<M::Response, ActorError>
-    where
-        M: Message,
-        A: Handler<M>,
-    {
-        let (response_sender, response_receiver) = oneshot::channel();
-        let message = ActorMessage::<M, A>::new(msg, Some(response_sender));
-        if let Err(error) = self.sender.send(Box::new(message)) {
-            log::error!("Failed to ask message! {}", error.to_string());
-            Err(ActorError::SendError(error.to_string()))
-        } else {
-            response_receiver
-                .await
-                .map_err(|error| ActorError::SendError(error.to_string()))
-        }
-    }
+    // pub async fn ask<Res: Copy + Send + Sync>(&self, msg: T) -> Result<Res, ActorError> {
+    //     let (response_sender, response_receiver) = mpsc::unbounded_channel::<Message<Res>>();
+
+    //     let sender = ActorRef {
+    //         path: "asker".into(),
+    //         sender: HandlerRef {
+    //             sender: response_sender,
+    //         },
+    //     };
+    //     if let Err(error) = self.sender.send(message) {
+    //         log::error!("Failed to ask message! {}", error.to_string());
+    //         Err(ActorError::SendError(error.to_string()))
+    //     } else {
+    //         response_receiver
+    //             .await
+    //             .map_err(|error| ActorError::SendError(error.to_string()))
+    //     }
+    // }
 
     pub fn is_closed(&self) -> bool {
         self.sender.is_closed()
@@ -130,7 +83,7 @@ impl<A: Actor> HandlerRef<A> {
 #[cfg(test)]
 mod tests {
 
-    use crate::{system::ActorSystem, ActorPath};
+    use crate::{actor::ActorContext, system::ActorSystem, ActorPath};
 
     use super::*;
 
@@ -142,21 +95,23 @@ mod tests {
     #[derive(Debug, Clone)]
     struct MyMessage(String);
 
-    impl Message for MyMessage {
+    impl Request for MyMessage {
         type Response = usize;
     }
 
-    #[async_trait]
-    impl Handler<MyMessage> for MyActor {
-        async fn handle(&mut self, msg: MyMessage, _ctx: &mut ActorContext) -> usize {
-            log::debug!("received message! {:?}", &msg);
-            self.counter += 1;
-            log::debug!("counter is now {}", &self.counter);
-            self.counter
-        }
-    }
+    // #[async_trait]
+    // impl Handler<MyMessage> for MyActor {
+    //     async fn handle(&mut self, msg: MyMessage, _ctx: &mut ActorContext) -> usize {
+    //         log::debug!("received message! {:?}", &msg);
+    //         self.counter += 1;
+    //         log::debug!("counter is now {}", &self.counter);
+    //         self.counter
+    //     }
+    // }
 
-    impl Actor for MyActor {}
+    impl Actor for MyActor {
+        type UserMessageType = MyMessage;
+    }
 
     #[tokio::test]
     async fn actor_tell() {
@@ -167,45 +122,24 @@ mod tests {
 
         let mut actor = MyActor { counter: 0 };
         let msg = MyMessage("Hello World!".to_string());
-        let (sender, mut receiver): (MailboxSender<MyActor>, MailboxReceiver<MyActor>) =
+        let (sender, mut receiver): (MailboxSender<MyMessage>, MailboxReceiver<MyMessage>) =
             ActorMailbox::create();
         let actor_ref = HandlerRef { sender };
         let system = ActorSystem::new("test");
         let path = ActorPath::from("/test");
-        let mut ctx = ActorContext { path, system };
-        tokio::spawn(async move {
-            while let Some(mut msg) = receiver.recv().await {
-                msg.handle(&mut actor, &mut ctx).await;
-            }
-        });
+        let mut ctx = ActorContext {
+            path,
+            system,
+            receiver: actor.create_receive(),
+        };
+        // tokio::spawn(async move {
+        //     while let Some(mut msg) = receiver.recv().await {
+        //         msg.handle(&mut actor, &mut ctx).await;
+        //     }
+        // });
 
-        actor_ref.tell(msg).unwrap();
+        actor_ref.tell(Message::UserMessage(msg)).unwrap();
 
         tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
-    }
-
-    #[tokio::test]
-    async fn actor_ask() {
-        if std::env::var("RUST_LOG").is_err() {
-            std::env::set_var("RUST_LOG", "trace");
-        }
-        let _ = env_logger::builder().is_test(true).try_init();
-
-        let mut actor = MyActor { counter: 0 };
-        let msg = MyMessage("Hello World!".to_string());
-        let (sender, mut receiver): (MailboxSender<MyActor>, MailboxReceiver<MyActor>) =
-            ActorMailbox::create();
-        let actor_ref = HandlerRef { sender };
-        let system = ActorSystem::new("test");
-        let path = ActorPath::from("/test");
-        let mut ctx = ActorContext { path, system };
-        tokio::spawn(async move {
-            while let Some(mut msg) = receiver.recv().await {
-                msg.handle(&mut actor, &mut ctx).await;
-            }
-        });
-
-        let result = actor_ref.ask(msg).await.unwrap();
-        assert_eq!(result, 1);
     }
 }

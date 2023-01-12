@@ -4,16 +4,9 @@ use ruactor::*;
 struct TestEvent(String);
 
 #[derive(Clone)]
-struct Hello<S> {
+struct Hello {
     counter: u32,
-    state: S,
 }
-
-#[derive(Clone)]
-struct Idle {}
-
-#[derive(Clone)]
-struct Running {}
 
 // enum State {
 //     Idle,
@@ -37,41 +30,53 @@ struct Running {}
 //     }
 // }
 
+use ruactor::Receive;
+
+struct IdleState {}
+
 #[async_trait]
-impl<S: Sync + Send + 'static> Actor for Hello<S> {}
+impl Actor for Hello {
+    type UserMessageType = TestMessage;
+
+    fn create_receive(&mut self) -> Box<dyn Receive<TestMessage>> {
+        ruactor::create_receive(|ctx, msg| println!("receive message in handle "))
+    }
+}
+
+#[async_trait]
+impl Receive<TestMessage> for IdleState {
+    async fn receive(&self, ctx: &mut ActorContext<TestMessage>, msg: Message<TestMessage>) {}
+}
 
 #[derive(Clone, Debug)]
 struct TestMessage(String);
 
-impl Message for TestMessage {
-    type Response = String;
-}
+// #[async_trait]
+// impl<S: Sync + Send + 'static + Handler<TestMessage>> Handler<TestMessage> for Hello<S> {
+//     async fn handle(&mut self, msg: TestMessage, ctx: &mut ActorContext) -> String {
+//         self.state.handle(msg, ctx);
 
-#[async_trait]
-impl<S: Sync + Send + 'static + Handler<TestMessage>> Handler<TestMessage> for Hello<S> {
-    async fn handle(&mut self, msg: TestMessage, ctx: &mut ActorContext) -> String {
-        self.state.handle(msg, ctx);
-
-        self.counter += 1;
-        "Ping!".to_string()
-    }
-}
+//         self.counter += 1;
+//         "Ping!".to_string()
+//     }
+// }
 
 #[tokio::main]
 async fn main() {
     let system = ActorSystem::new("test");
 
     let actor_ref = system
-        .create_actor("test-actor", || Hello {
-            counter: 0,
-            state: Idle {},
-        })
+        .create_actor("test-actor", || Hello { counter: 0 })
         .await
         .unwrap();
 
     tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
 
-    // let msg_a = TestMessage("hello world!".to_string());
+    let msg_a = TestMessage("hello world!".to_string());
+    actor_ref.tell(Message::UserMessage(msg_a));
+
+    tokio::time::sleep(tokio::time::Duration::from_secs(1000)).await;
+
     // let response_a = actor_ref.ask(msg_a).await.unwrap();
     // assert_eq!(response_a, "Ping!".to_string());
 
