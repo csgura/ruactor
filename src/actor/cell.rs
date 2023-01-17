@@ -1,3 +1,4 @@
+use std::alloc::System;
 use std::collections::HashMap;
 use std::mem::replace;
 use std::sync::atomic::Ordering;
@@ -91,7 +92,11 @@ impl<T: 'static + Send> ActorCell<T> {
         let mut context = self.create_context(self_ref.clone());
 
         if let Some(actor) = &self.actor {
-            actor.on_message(&mut context, message);
+            match message {
+                Message::System(msg) => actor.on_system_message(&mut context, msg),
+                Message::User(msg) => actor.on_message(&mut context, msg),
+                Message::Timer(msg) => actor.on_message(&mut context, msg),
+            }
 
             self.drop_context(self_ref, context);
         }

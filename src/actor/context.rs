@@ -16,13 +16,21 @@ impl<T: 'static + Send> Context<T> {
         self.actor = Some(Box::new(new_actor));
     }
 
-    pub fn start_single_timer(&mut self, d: Duration, t: T) {
+    pub fn start_single_timer(&mut self, name: String, d: Duration, t: T) {
         let self_ref = self.self_ref.clone();
         tokio::spawn(async move {
             let s = tokio::time::sleep(d);
             s.await;
 
-            self_ref.send(Message::User(t));
+            self_ref.send(Message::Timer(t));
         });
     }
+
+    pub fn cancel_timer(&mut self, name: String) {}
+
+    pub fn set_receive_timeout(&mut self, d: Duration) {}
+
+    pub fn stash(&mut self, message: Message<T>) {}
+
+    pub fn unstash_all(&mut self) {}
 }

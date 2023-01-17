@@ -51,7 +51,11 @@ impl<T: 'static + Send> Clone for ActorRef<T> {
 }
 
 impl<T: 'static + Send> ActorRef<T> {
-    pub fn send(&self, msg: Message<T>) {
+    pub fn tell(&self, msg: T) {
+        self.mbox.send(self.clone(), Message::User(msg));
+    }
+
+    pub(crate) fn send(&self, msg: Message<T>) {
         self.mbox.send(self.clone(), msg);
     }
 }
@@ -68,6 +72,7 @@ pub enum SystemMessage {
 pub enum Message<T: 'static + Send> {
     System(SystemMessage),
     User(T),
+    Timer(T),
 }
 
 pub trait Actor: Send + 'static {
@@ -82,8 +87,15 @@ pub trait Actor: Send + 'static {
     fn on_message(
         &self,
         context: &mut Context<Self::UserMessageType>,
-        message: Message<Self::UserMessageType>,
+        message: Self::UserMessageType,
     );
+
+    fn on_system_message(
+        &self,
+        context: &mut Context<Self::UserMessageType>,
+        message: SystemMessage,
+    ) {
+    }
 }
 
 struct PropWrap<A: Actor, P: Prop<A>> {

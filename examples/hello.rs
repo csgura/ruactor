@@ -13,7 +13,7 @@ impl Actor for Hello {
     fn on_message(
         &self,
         context: &mut Context<Self::UserMessageType>,
-        message: Message<Self::UserMessageType>,
+        message: Self::UserMessageType,
     ) {
         println!("receive message {:?}", message);
     }
@@ -21,7 +21,11 @@ impl Actor for Hello {
     fn on_enter(&self, context: &mut Context<Self::UserMessageType>) {
         println!("start timer");
 
-        context.start_single_timer(Duration::from_secs(1), TestMessage("timer".into()));
+        context.start_single_timer(
+            "alarm".into(),
+            Duration::from_secs(1),
+            TestMessage("timer".into()),
+        );
     }
 }
 #[derive(Clone, Debug)]
@@ -39,7 +43,7 @@ async fn main() {
     tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
 
     let msg_a = TestMessage("hello world!".to_string());
-    actor_ref.send(Message::User(msg_a));
+    actor_ref.tell(msg_a);
 
     tokio::time::sleep(tokio::time::Duration::from_secs(1000)).await;
 
