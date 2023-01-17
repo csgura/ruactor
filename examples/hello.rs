@@ -14,6 +14,23 @@ struct Child {
 impl Actor for Child {
     type UserMessageType = TestMessage;
 
+    fn on_enter(&self, context: &mut Context<Self::UserMessageType>) {
+        context.set_receive_timeout(Duration::from_secs(1));
+    }
+
+    fn on_system_message(
+        &self,
+        context: &mut Context<Self::UserMessageType>,
+        message: SystemMessage,
+    ) {
+        match message {
+            SystemMessage::ReceiveTimeout => {
+                println!("{} receive tmout", context.self_ref());
+                context.stop_self();
+            }
+        }
+    }
+
     fn on_message(
         &self,
         context: &mut Context<Self::UserMessageType>,
@@ -45,7 +62,9 @@ impl Actor for Hello {
                 let child = context.get_or_create_child(key.clone(), || Child { counter: 0 });
                 child.tell(TestMessage::Hello(key));
             }
-            _ => println!("ignore"),
+            TestMessage::Timer(tmr) => {
+                println!("receive timer {}", tmr);
+            }
         }
     }
 
@@ -83,6 +102,9 @@ async fn main() {
     actor_ref.tell(msg_a);
 
     let msg_a = TestMessage::Hello("hello world!".to_string());
+    actor_ref.tell(msg_a);
+
+    let msg_a = TestMessage::Hello("hi".to_string());
     actor_ref.tell(msg_a);
 
     tokio::time::sleep(tokio::time::Duration::from_secs(1000)).await;

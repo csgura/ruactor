@@ -5,6 +5,7 @@ use std::{
         atomic::{AtomicBool, AtomicU32, Ordering},
         Arc,
     },
+    time::Instant,
 };
 
 use tokio::sync::Mutex;
@@ -54,6 +55,7 @@ impl<T: 'static + Send> Mailbox<T> {
             prop: Box::new(pdyn),
             receive_timeout: None,
             childrens: HashMap::new(),
+            last_message_timestamp: Instant::now(),
         };
 
         let mbox = Mailbox {

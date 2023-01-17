@@ -5,11 +5,13 @@ use std::hash::Hash;
 use std::mem::replace;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
+use std::time::Instant;
 
 use super::Actor;
 use super::ActorRef;
 use super::Context;
 use super::Message;
+use super::SystemMessage;
 use crate::system::PropDyn;
 
 pub struct TimerMessage<T: 'static> {
@@ -37,6 +39,7 @@ pub struct ActorCell<T: 'static + Send> {
     pub(crate) timer: Timer<T>,
     pub(crate) receive_timeout: Option<Duration>,
     pub(crate) childrens: HashMap<String, Box<dyn Any + Send + Sync + 'static>>,
+    pub(crate) last_message_timestamp: Instant,
 }
 
 impl<T: 'static + Send> ActorCell<T> {
@@ -50,12 +53,14 @@ impl<T: 'static + Send> ActorCell<T> {
             stash: None,
             timer: replace(&mut self.timer, dt),
             childrens: replace(&mut self.childrens, dc),
+            receive_timeout: self.receive_timeout.clone(),
         }
     }
 
     fn drop_context(&mut self, self_ref: ActorRef<T>, context: Context<T>) {
         self.timer = context.timer;
         self.childrens = context.childrens;
+        self.receive_timeout = context.receive_timeout;
 
         if let Some(mess) = context.stash {
             self.stash.push(mess);
@@ -99,13 +104,43 @@ impl<T: 'static + Send> ActorCell<T> {
 
         if let Some(actor) = &self.actor {
             match message {
-                Message::System(msg) => actor.on_system_message(&mut context, msg),
-                Message::User(msg) => actor.on_message(&mut context, msg),
-                Message::Timer(msg) => actor.on_message(&mut context, msg),
-            }
+                Message::System(msg) => {
+                    self.last_message_timestamp = Instant::now();
+                    actor.on_system_message(&mut context, msg)
+                }
+                Message::User(msg) => {
+                    self.last_message_timestamp = Instant::now();
 
-            self.drop_context(self_ref, context);
+                    actor.on_message(&mut context, msg)
+                }
+                Message::Timer(msg) => {
+                    self.last_message_timestamp = Instant::now();
+                    actor.on_message(&mut context, msg)
+                }
+                Message::ReceiveTimeout(exp) => {
+                    if let Some(tmout) = self.receive_timeout {
+                        if exp > self.last_message_timestamp {
+                            if exp - self.last_message_timestamp >= tmout {
+                                actor.on_system_message(
+                                    &mut context,
+                                    super::SystemMessage::ReceiveTimeout,
+                                );
+                            } else {
+                                let exp = (self.last_message_timestamp + tmout) - Instant::now();
+
+                                context.schedule_receive_timeout(exp);
+                            }
+                        } else {
+                            context.schedule_receive_timeout(tmout);
+                        }
+                    }
+                }
+                Message::PoisonPil => {
+                    // covered by actor loop
+                }
+            }
         }
+        self.drop_context(self_ref, context);
     }
 
     pub async fn actor_loop(&mut self, self_ref: ActorRef<T>) {
@@ -128,7 +163,16 @@ impl<T: 'static + Send> ActorCell<T> {
         while let Some(msg) = self.ch.recv().await {
             num_msg.fetch_sub(1, Ordering::SeqCst);
 
-            self.on_message(self_ref.clone(), msg);
+            match msg {
+                Message::PoisonPil => {
+                    //println!("stop actor {}", self_ref);
+                    self.ch.close();
+                    break;
+                }
+                _ => {
+                    self.on_message(self_ref.clone(), msg);
+                }
+            }
 
             if num_msg.load(Ordering::SeqCst) == 0 {
                 break;

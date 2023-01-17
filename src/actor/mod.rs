@@ -7,7 +7,7 @@ use std::{
         atomic::{AtomicBool, AtomicU32, Ordering},
         Arc,
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 mod cell;
@@ -80,6 +80,8 @@ pub enum Message<T: 'static + Send> {
     System(SystemMessage),
     User(T),
     Timer(T),
+    ReceiveTimeout(Instant),
+    PoisonPil,
 }
 
 pub trait Actor: Send + 'static {

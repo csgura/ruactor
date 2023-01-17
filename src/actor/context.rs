@@ -1,8 +1,13 @@
-use std::{any::Any, collections::HashMap, sync::Arc, time::Duration};
+use std::{
+    any::Any,
+    collections::HashMap,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use crate::{Actor, Message, Prop};
 
-use super::{ActorRef, Mailbox, Timer};
+use super::{ActorRef, Mailbox, SystemMessage, Timer};
 
 pub struct Context<T: 'static + Send> {
     pub(crate) self_ref: ActorRef<T>,
@@ -10,6 +15,7 @@ pub struct Context<T: 'static + Send> {
     pub(crate) stash: Option<T>,
     pub(crate) timer: Timer<T>,
     pub(crate) childrens: HashMap<String, Box<dyn Any + Send + Sync + 'static>>,
+    pub(crate) receive_timeout: Option<Duration>,
 }
 
 impl<T: 'static + Send> Context<T> {
@@ -33,7 +39,23 @@ impl<T: 'static + Send> Context<T> {
 
     pub fn cancel_timer(&mut self, name: String) {}
 
-    pub fn set_receive_timeout(&mut self, d: Duration) {}
+    pub fn set_receive_timeout(&mut self, d: Duration) {
+        self.receive_timeout = Some(d);
+        self.schedule_receive_timeout(d);
+    }
+
+    pub(crate) fn schedule_receive_timeout(&mut self, d: Duration) {
+        let self_ref = self.self_ref.clone();
+
+        let tmout = Instant::now() + d;
+
+        tokio::spawn(async move {
+            let s = tokio::time::sleep(d);
+            s.await;
+
+            self_ref.send(Message::ReceiveTimeout(tmout));
+        });
+    }
 
     pub fn stash(&mut self, message: Message<T>) {}
 
@@ -67,5 +89,9 @@ impl<T: 'static + Send> Context<T> {
                 actor_ref
             }
         }
+    }
+
+    pub fn stop_self(&mut self) {
+        self.self_ref.send(Message::PoisonPil);
     }
 }
