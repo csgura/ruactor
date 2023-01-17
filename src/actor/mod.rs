@@ -9,6 +9,9 @@ use std::{
     time::Duration,
 };
 
+mod cell;
+mod context;
+
 use tokio::{sync::Mutex, time::Sleep};
 
 use crate::{
@@ -20,6 +23,8 @@ pub struct ActorRef<T: 'static + Send> {
     mbox: Arc<Mailbox<T>>,
     path: ActorPath,
 }
+
+pub use cell::ActorCell;
 
 impl<T: 'static + Send> ActorRef<T> {
     pub fn new(path: ActorPath, mbox: Arc<Mailbox<T>>) -> ActorRef<T> {
@@ -49,46 +54,8 @@ impl<T: 'static + Send> ActorRef<T> {
     }
 }
 
-struct TimerMessage<T: 'static> {
-    sleep: Sleep,
-    msg: T,
-    repeat: bool,
-}
-
-struct Timer<T: 'static> {
-    list: HashMap<String, TimerMessage<T>>,
-}
-
-impl<T: 'static> Default for Timer<T> {
-    fn default() -> Self {
-        Self {
-            list: Default::default(),
-        }
-    }
-}
-
-pub struct Context<T: 'static + Send> {
-    self_ref: ActorRef<T>,
-    actor: Option<Box<dyn Actor<UserMessageType = T>>>,
-    stash: Option<T>,
-    timer: Timer<T>,
-}
-
-impl<T: 'static + Send> Context<T> {
-    pub fn transit<A: Actor<UserMessageType = T> + 'static>(&mut self, new_actor: A) {
-        self.actor = Some(Box::new(new_actor));
-    }
-
-    pub fn start_single_timer(&mut self, d: Duration, t: T) {
-        let self_ref = self.self_ref.clone();
-        tokio::spawn(async move {
-            let s = tokio::time::sleep(d);
-            s.await;
-
-            self_ref.send(Message::User(t));
-        });
-    }
-}
+pub use cell::Timer;
+pub use context::Context;
 
 #[derive(Debug)]
 pub enum SystemMessage {
@@ -115,105 +82,6 @@ pub trait Actor: Send + 'static {
         context: &mut Context<Self::UserMessageType>,
         message: Message<Self::UserMessageType>,
     );
-}
-
-pub struct ActorCell<T: 'static + Send> {
-    actor: Option<Box<dyn Actor<UserMessageType = T>>>,
-    prop: Box<dyn PropDyn<T>>,
-    ch: tokio::sync::mpsc::UnboundedReceiver<Message<T>>,
-    stash: Vec<T>,
-    timer: Timer<T>,
-}
-
-impl<T: 'static + Send> ActorCell<T> {
-    fn create_context(&mut self, self_ref: ActorRef<T>) -> Context<T> {
-        let dt = Timer::default();
-
-        Context {
-            self_ref: self_ref,
-            actor: None,
-            stash: None,
-            timer: replace(&mut self.timer, dt),
-        }
-    }
-
-    fn drop_context(&mut self, self_ref: ActorRef<T>, context: Context<T>) {
-        self.timer = context.timer;
-
-        if let Some(mess) = context.stash {
-            self.stash.push(mess);
-        }
-
-        if context.actor.is_some() {
-            let old_actor = replace(&mut self.actor, context.actor);
-
-            self.on_exit(old_actor, self_ref.clone());
-
-            self.on_enter(self_ref.clone());
-        }
-    }
-
-    fn on_exit(
-        &mut self,
-        old_actor: Option<Box<dyn Actor<UserMessageType = T>>>,
-        self_ref: ActorRef<T>,
-    ) {
-        let mut context = self.create_context(self_ref.clone());
-
-        if let Some(actor) = old_actor {
-            actor.on_exit(&mut context);
-
-            self.drop_context(self_ref, context);
-        }
-    }
-
-    fn on_enter(&mut self, self_ref: ActorRef<T>) {
-        let mut context = self.create_context(self_ref.clone());
-
-        if let Some(actor) = &self.actor {
-            actor.on_enter(&mut context);
-
-            self.drop_context(self_ref, context);
-        }
-    }
-
-    fn on_message(&mut self, self_ref: ActorRef<T>, message: Message<T>) {
-        let mut context = self.create_context(self_ref.clone());
-
-        if let Some(actor) = &self.actor {
-            actor.on_message(&mut context, message);
-
-            self.drop_context(self_ref, context);
-        }
-    }
-
-    async fn actor_loop(&mut self, self_ref: ActorRef<T>) {
-        if self.actor.is_none() {
-            self.actor = Some(self.prop.create());
-
-            self.on_enter(self_ref.clone());
-        }
-
-        let num_msg = self_ref.mbox.num_msg.clone();
-
-        // let mut actor = cell.actor;
-        // let mut ch = cell.ch;
-
-        // let mut stash = cell.stash;
-        if num_msg.load(Ordering::SeqCst) == 0 {
-            return;
-        }
-
-        while let Some(msg) = self.ch.recv().await {
-            num_msg.fetch_sub(1, Ordering::SeqCst);
-
-            self.on_message(self_ref.clone(), msg);
-
-            if num_msg.load(Ordering::SeqCst) == 0 {
-                break;
-            }
-        }
-    }
 }
 
 pub struct Mailbox<T: 'static + Send> {
@@ -266,6 +134,7 @@ impl<T: 'static + Send> Mailbox<T> {
                 list: HashMap::new(),
             },
             prop: Box::new(pdyn),
+            receive_timeout: None,
         };
 
         let mbox = Mailbox {

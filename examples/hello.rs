@@ -27,16 +27,6 @@ impl Actor for Hello {
 #[derive(Clone, Debug)]
 struct TestMessage(String);
 
-// #[async_trait]
-// impl<S: Sync + Send + 'static + Handler<TestMessage>> Handler<TestMessage> for Hello<S> {
-//     async fn handle(&mut self, msg: TestMessage, ctx: &mut ActorContext) -> String {
-//         self.state.handle(msg, ctx);
-
-//         self.counter += 1;
-//         "Ping!".to_string()
-//     }
-// }
-
 #[tokio::main]
 async fn main() {
     let system = ActorSystem::new("test");
