@@ -2,10 +2,11 @@ use std::{any::Any, collections::HashMap, sync::Arc};
 
 use tokio::sync::RwLock;
 
+use thiserror::Error;
+
 use crate::{
-    actor::{runner::ActorRunner, Actor, ActorRef},
-    bus::EventReceiver,
-    ActorError, ActorPath,
+    actor::{Actor, ActorRef, Mailbox},
+    path::ActorPath,
 };
 
 /// Events that this actor system will send
@@ -14,15 +15,6 @@ pub trait Prop<A: Actor> {
     fn create(&self) -> A;
 }
 
-// impl<A> Prop<A> for A
-// where
-//     A: Clone + Actor,
-// {
-//     fn create(&self) -> A {
-//         self.clone()
-//     }
-// }
-
 impl<A, F> Prop<A> for F
 where
     A: Actor,
@@ -30,6 +22,30 @@ where
 {
     fn create(&self) -> A {
         self()
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum ActorError {
+    #[error("Actor exists")]
+    Exists(ActorPath),
+
+    #[error("Actor creation failed")]
+    CreateError(String),
+
+    #[error("Sending message failed")]
+    SendError(String),
+
+    #[error("Actor runtime error")]
+    RuntimeError(anyhow::Error),
+}
+
+impl ActorError {
+    pub fn new<E>(error: E) -> Self
+    where
+        E: std::error::Error + Send + Sync + 'static,
+    {
+        Self::RuntimeError(anyhow::Error::new(error))
     }
 }
 
@@ -70,10 +86,9 @@ impl ActorSystem {
         }
 
         let system = self.clone();
-        let (mut runner, actor_ref) = ActorRunner::create(path, actor);
-        tokio::spawn(async move {
-            runner.start(system).await;
-        });
+        let mbox = Mailbox::new(actor);
+
+        let actor_ref = ActorRef::new(path, Arc::new(mbox));
 
         let path = actor_ref.path().clone();
         let any = Box::new(actor_ref.clone());
@@ -153,270 +168,4 @@ impl ActorSystem {
         let actors = Arc::new(RwLock::new(HashMap::new()));
         ActorSystem { name, actors }
     }
-}
-
-#[cfg(test)]
-mod tests {
-
-    use crate::actor::{Actor, ActorContext, Handler, Request};
-    use async_trait::async_trait;
-    use thiserror::Error;
-
-    use super::*;
-
-    #[derive(Clone, Debug)]
-    struct TestEvent(String);
-
-    #[derive(Default, Clone)]
-    struct TestActor {
-        counter: usize,
-    }
-
-    #[async_trait]
-    impl Actor for TestActor {
-        type UserMessageType = TestEvent;
-
-        async fn pre_start(
-            &mut self,
-            _ctx: &mut ActorContext<TestEvent>,
-        ) -> Result<(), ActorError> {
-            log::debug!("Starting actor TestActor!");
-            Ok(())
-        }
-
-        async fn post_stop(&mut self, _ctx: &mut ActorContext<TestEvent>) {
-            log::debug!("Stopped actor TestActor!");
-        }
-    }
-
-    #[derive(Clone, Debug)]
-    struct TestMessage(usize);
-
-    impl Request for TestMessage {
-        type Response = usize;
-    }
-
-    // #[async_trait]
-    // impl Handler<TestMessage> for TestActor {
-    //     async fn handle(&mut self, msg: TestMessage, ctx: &mut ActorContext<TestEvent>) -> usize {
-    //         log::debug!("received message! {:?}", &msg);
-    //         self.counter += 1;
-    //         log::debug!("counter is now {}", &self.counter);
-    //         log::debug!("{} on system {}", &ctx.path, ctx.system.name());
-
-    //         self.counter
-    //     }
-    // }
-
-    #[derive(Default, Clone)]
-    struct OtherActor {
-        message: String,
-        child: Option<ActorRef<TestEvent>>,
-    }
-
-    #[async_trait]
-    impl Actor for OtherActor {
-        type UserMessageType = TestEvent;
-
-        async fn pre_start(&mut self, ctx: &mut ActorContext<TestEvent>) -> Result<(), ActorError> {
-            log::debug!("OtherActor initial message: {}", &self.message);
-            self.child = ctx
-                .create_child("child", || TestActor { counter: 0 })
-                .await
-                .ok();
-            Ok(())
-        }
-
-        async fn post_stop(&mut self, _ctx: &mut ActorContext<TestEvent>) {
-            log::debug!("OtherActor stopped.");
-        }
-    }
-
-    #[derive(Clone, Debug)]
-    struct OtherMessage(String);
-
-    impl Request for OtherMessage {
-        type Response = String;
-    }
-
-    #[async_trait]
-    impl Handler<OtherMessage> for OtherActor {
-        async fn handle(
-            &mut self,
-            msg: OtherMessage,
-            ctx: &mut ActorContext<OtherMessage>,
-        ) -> String {
-            log::debug!("OtherActor received message! {:?}", &msg);
-            log::debug!("original message is {}", &self.message);
-            self.message = msg.0;
-            log::debug!("message is now {}", &self.message);
-            log::debug!("{} on system {}", &ctx.path, ctx.system.name());
-
-            self.message.clone()
-        }
-    }
-
-    // #[tokio::test]
-    // async fn actor_create() {
-    //     if std::env::var("RUST_LOG").is_err() {
-    //         std::env::set_var("RUST_LOG", "trace");
-    //     }
-    //     let _ = env_logger::builder().is_test(true).try_init();
-
-    //     let msg = TestMessage(10);
-
-    //     let system = ActorSystem::new("test");
-    //     let actor_ref = system
-    //         .create_actor("test-actor", || TestActor { counter: 0 })
-    //         .await
-    //         .unwrap();
-    //     let result = actor_ref.ask(msg).await.unwrap();
-
-    //     assert_eq!(result, 1);
-    // }
-
-    #[derive(Debug, Error)]
-    #[error("custom error")]
-    struct CustomError(String);
-
-    fn create_other(message: &String) -> OtherActor {
-        OtherActor {
-            message: message.clone(),
-            child: None,
-        }
-    }
-
-    // #[tokio::test]
-    // async fn actor_get_or_create() {
-    //     if std::env::var("RUST_LOG").is_err() {
-    //         std::env::set_var("RUST_LOG", "trace");
-    //     }
-    //     let _ = env_logger::builder().is_test(true).try_init();
-
-    //     let system = ActorSystem::new("test");
-
-    //     let initial_message = "hello world!".to_string();
-    //     let actor_fn = move || create_other(&initial_message);
-    //     let actor_ref = system
-    //         .get_or_create_actor("test-actor", actor_fn)
-    //         .await
-    //         .unwrap();
-
-    //     let msg = OtherMessage("Updated message.".to_string());
-    //     let result = actor_ref.ask(msg).await.unwrap();
-
-    //     assert_eq!(result, "Updated message.".to_string());
-    // }
-
-    // #[tokio::test]
-    // async fn actor_stop() {
-    //     if std::env::var("RUST_LOG").is_err() {
-    //         std::env::set_var("RUST_LOG", "trace");
-    //     }
-    //     let _ = env_logger::builder().is_test(true).try_init();
-
-    //     let msg = TestMessage(10);
-
-    //     let system = ActorSystem::new("test");
-
-    //     {
-    //         let actor_ref = system
-    //             .create_actor("test-actor", || TestActor { counter: 0 })
-    //             .await
-    //             .unwrap();
-    //         let result = actor_ref.ask(msg).await.unwrap();
-
-    //         assert_eq!(result, 1);
-
-    //         system.stop_actor(actor_ref.path()).await;
-    //     }
-
-    //     tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
-    // }
-
-    // #[tokio::test]
-    // async fn actor_events() {
-    //     if std::env::var("RUST_LOG").is_err() {
-    //         std::env::set_var("RUST_LOG", "trace");
-    //     }
-    //     let _ = env_logger::builder().is_test(true).try_init();
-
-    //     let msg = TestMessage(10);
-
-    //     let system = ActorSystem::new("test");
-    //     let actor_ref = system
-    //         .create_actor("test-actor", || TestActor { counter: 0 })
-    //         .await
-    //         .unwrap();
-
-    //     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-
-    //     let result = actor_ref.ask(msg).await.unwrap();
-
-    //     assert_eq!(result, 1);
-    // }
-
-    // #[tokio::test]
-    // async fn actor_get() {
-    //     if std::env::var("RUST_LOG").is_err() {
-    //         std::env::set_var("RUST_LOG", "trace");
-    //     }
-    //     let _ = env_logger::builder().is_test(true).try_init();
-
-    //     let system = ActorSystem::new("test");
-    //     let original = system
-    //         .create_actor("test-actor", || TestActor { counter: 0 })
-    //         .await
-    //         .unwrap();
-
-    //     if let Some(actor_ref) = system.get_actor::<TestActor>(original.path()).await {
-    //         let msg = TestMessage(10);
-    //         let result = actor_ref.ask(msg).await.unwrap();
-    //         assert_eq!(result, 1);
-    //     } else {
-    //         panic!("It should have retrieved the actor!")
-    //     }
-
-    //     if let Some(actor_ref) = system.get_actor::<OtherActor>(original.path()).await {
-    //         let msg = OtherMessage("Hello world!".to_string());
-    //         let result = actor_ref.ask(msg).await.unwrap();
-    //         println!("Result is: {result}");
-    //         panic!("It should not go here!");
-    //     }
-
-    //     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-    // }
-
-    // #[tokio::test]
-    // async fn actor_parent_child() {
-    //     if std::env::var("RUST_LOG").is_err() {
-    //         std::env::set_var("RUST_LOG", "trace");
-    //     }
-    //     let _ = env_logger::builder().is_test(true).try_init();
-
-    //     let system = ActorSystem::new("test");
-
-    //     {
-    //         let actor_ref = system
-    //             .create_actor("test-actor", || OtherActor {
-    //                 message: "Initial".to_string(),
-    //                 child: None,
-    //             })
-    //             .await
-    //             .unwrap();
-    //         let msg = OtherMessage("new message!".to_string());
-    //         let result = actor_ref.ask(msg).await.unwrap();
-    //         assert_eq!(result, "new message!".to_string());
-
-    //         tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
-    //         system.stop_actor(actor_ref.path()).await;
-    //     }
-
-    //     tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
-    //     let actors = system.actors.read().await;
-    //     for actor in actors.keys() {
-    //         println!("Still active!: {actor:?}");
-    //     }
-    //     assert_eq!(actors.len(), 0);
-    // }
 }

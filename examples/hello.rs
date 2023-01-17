@@ -1,53 +1,21 @@
 use ruactor::*;
 
-#[derive(Clone, Debug)]
-struct TestEvent(String);
-
 #[derive(Clone)]
 struct Hello {
     counter: u32,
 }
 
-// enum State {
-//     Idle,
-//     Running,
-// }
-// #[async_trait]
-// impl Handler<TestMessage> for State {
-//     async fn handle(&mut self, msg: TestMessage, ctx: &mut ActorContext) -> String {
-//         match self {
-//             State::Idle => {
-//                 println!("current state = idle");
-//                 *self = State::Running
-//             }
-//             State::Running => {
-//                 println!("current state = running");
-//                 *self = State::Idle
-//             }
-//         }
-
-//         "Ping!".to_string()
-//     }
-// }
-
-use ruactor::Receive;
-
-struct IdleState {}
-
-#[async_trait]
 impl Actor for Hello {
     type UserMessageType = TestMessage;
 
-    fn create_receive(&mut self) -> Box<dyn Receive<TestMessage>> {
-        ruactor::create_receive(|ctx, msg| println!("receive message in handle "))
+    fn on_message(
+        &self,
+        context: &mut Context<Self::UserMessageType>,
+        message: Message<Self::UserMessageType>,
+    ) {
+        println!("receive message {:?}", message);
     }
 }
-
-#[async_trait]
-impl Receive<TestMessage> for IdleState {
-    async fn receive(&self, ctx: &mut ActorContext<TestMessage>, msg: Message<TestMessage>) {}
-}
-
 #[derive(Clone, Debug)]
 struct TestMessage(String);
 
@@ -73,7 +41,7 @@ async fn main() {
     tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
 
     let msg_a = TestMessage("hello world!".to_string());
-    actor_ref.tell(Message::UserMessage(msg_a));
+    actor_ref.send(Message::User(msg_a));
 
     tokio::time::sleep(tokio::time::Duration::from_secs(1000)).await;
 
