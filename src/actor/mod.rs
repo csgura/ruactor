@@ -26,6 +26,16 @@ pub struct ActorRef<T: 'static + Send> {
     path: ActorPath,
 }
 
+pub(crate) trait ParentRef: 'static + Send {
+    fn send_internal_message(&self, message: InternalMessage);
+}
+
+impl<T: 'static + Send> ParentRef for ActorRef<T> {
+    fn send_internal_message(&self, message: InternalMessage) {
+        self.send(Message::Internal(message))
+    }
+}
+
 impl<T: 'static + Send> Display for ActorRef<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.path())
@@ -76,12 +86,18 @@ pub enum SystemMessage {
 }
 
 #[derive(Debug)]
-pub enum Message<T: 'static + Send> {
+pub(crate) enum Message<T: 'static + Send> {
     System(SystemMessage),
     User(T),
     Timer(T),
     ReceiveTimeout(Instant),
     PoisonPil,
+    Internal(InternalMessage),
+}
+
+#[derive(Debug)]
+pub(crate) enum InternalMessage {
+    ChildTerminate(ActorPath),
 }
 
 pub trait Actor: Send + 'static {

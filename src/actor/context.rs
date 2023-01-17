@@ -5,11 +5,12 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::{Actor, Message, Prop};
+use crate::{Actor, Prop};
 
-use super::{ActorRef, Mailbox, SystemMessage, Timer};
+use super::{ActorRef, Mailbox, Message, ParentRef, SystemMessage, Timer};
 
 pub struct Context<T: 'static + Send> {
+    pub(crate) parent: Option<Box<dyn ParentRef>>,
     pub(crate) self_ref: ActorRef<T>,
     pub(crate) actor: Option<Box<dyn Actor<UserMessageType = T>>>,
     pub(crate) stash: Option<T>,
@@ -57,7 +58,7 @@ impl<T: 'static + Send> Context<T> {
         });
     }
 
-    pub fn stash(&mut self, message: Message<T>) {}
+    pub fn stash(&mut self, message: T) {}
 
     pub fn unstash_all(&mut self) {}
 
@@ -81,7 +82,7 @@ impl<T: 'static + Send> Context<T> {
             None => {
                 let cpath = self.self_ref.path.clone() / name.clone();
 
-                let mbox = Mailbox::new(prop);
+                let mbox = Mailbox::new(prop, Some(Box::new(self.self_ref.clone())));
 
                 let actor_ref = ActorRef::new(cpath, Arc::new(mbox));
 
@@ -93,5 +94,11 @@ impl<T: 'static + Send> Context<T> {
 
     pub fn stop_self(&mut self) {
         self.self_ref.send(Message::PoisonPil);
+
+        if self.parent.is_some() {
+            self.parent.as_ref().unwrap().send_internal_message(
+                super::InternalMessage::ChildTerminate(self.self_ref.path.clone()),
+            )
+        }
     }
 }

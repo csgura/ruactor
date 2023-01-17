@@ -11,6 +11,7 @@ use super::Actor;
 use super::ActorRef;
 use super::Context;
 use super::Message;
+use super::ParentRef;
 use super::SystemMessage;
 use crate::system::PropDyn;
 
@@ -32,6 +33,7 @@ impl<T: 'static> Default for Timer<T> {
 }
 
 pub struct ActorCell<T: 'static + Send> {
+    pub(crate) parent: Option<Box<dyn ParentRef>>,
     pub(crate) actor: Option<Box<dyn Actor<UserMessageType = T>>>,
     pub(crate) prop: Box<dyn PropDyn<T>>,
     pub(crate) ch: tokio::sync::mpsc::UnboundedReceiver<Message<T>>,
@@ -47,7 +49,9 @@ impl<T: 'static + Send> ActorCell<T> {
         let dt = Timer::default();
         let dc = HashMap::new();
 
+        let dp = None;
         Context {
+            parent: replace(&mut self.parent, dp),
             self_ref: self_ref,
             actor: None,
             stash: None,
@@ -58,6 +62,7 @@ impl<T: 'static + Send> ActorCell<T> {
     }
 
     fn drop_context(&mut self, self_ref: ActorRef<T>, context: Context<T>) {
+        self.parent = context.parent;
         self.timer = context.timer;
         self.childrens = context.childrens;
         self.receive_timeout = context.receive_timeout;
@@ -135,6 +140,13 @@ impl<T: 'static + Send> ActorCell<T> {
                         }
                     }
                 }
+                Message::Internal(super::InternalMessage::ChildTerminate(msg)) => {
+                    println!("child terminated : {}", msg);
+                    let key = msg.key();
+
+                    context.childrens.remove(&key);
+                    // println!("after children size =  {}", context.childrens.len());
+                }
                 Message::PoisonPil => {
                     // covered by actor loop
                 }
@@ -167,6 +179,7 @@ impl<T: 'static + Send> ActorCell<T> {
                 Message::PoisonPil => {
                     //println!("stop actor {}", self_ref);
                     self.ch.close();
+
                     break;
                 }
                 _ => {

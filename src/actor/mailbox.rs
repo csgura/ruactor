@@ -10,9 +10,9 @@ use std::{
 
 use tokio::sync::Mutex;
 
-use crate::{Actor, Message, Prop};
+use crate::{Actor, Prop};
 
-use super::{ActorCell, ActorRef, PropWrap, Timer};
+use super::{ActorCell, ActorRef, Message, ParentRef, PropWrap, Timer};
 
 pub struct Mailbox<T: 'static + Send> {
     pub(crate) ch: tokio::sync::mpsc::UnboundedSender<Message<T>>,
@@ -33,7 +33,7 @@ impl<T: 'static + Send> Clone for Mailbox<T> {
 }
 
 impl<T: 'static + Send> Mailbox<T> {
-    pub fn new<P, A>(p: P) -> Mailbox<T>
+    pub(crate) fn new<P, A>(p: P, parent: Option<Box<dyn ParentRef>>) -> Mailbox<T>
     where
         P: Prop<A>,
         A: Actor<UserMessageType = T>,
@@ -46,6 +46,7 @@ impl<T: 'static + Send> Mailbox<T> {
         let ch = tokio::sync::mpsc::unbounded_channel::<Message<T>>();
 
         let cell = ActorCell {
+            parent: parent,
             actor: None,
             ch: ch.1,
             stash: Vec::new(),
@@ -68,7 +69,7 @@ impl<T: 'static + Send> Mailbox<T> {
     }
 
     //#[async_recursion::async_recursion]
-    pub async fn receive(&self, self_ref: ActorRef<T>) {
+    pub(crate) async fn receive(&self, self_ref: ActorRef<T>) {
         let mut owned = false;
 
         if let Ok(mut cell) = self.cell.try_lock() {
@@ -93,7 +94,7 @@ impl<T: 'static + Send> Mailbox<T> {
         }
     }
 
-    pub fn schedule(&self, self_ref: ActorRef<T>) {
+    pub(crate) fn schedule(&self, self_ref: ActorRef<T>) {
         if !self.status.load(Ordering::SeqCst) {
             //println!("schedule");
             let mut cl: Mailbox<T> = self.clone();
@@ -108,7 +109,7 @@ impl<T: 'static + Send> Mailbox<T> {
         }
     }
 
-    pub fn send(&self, self_ref: ActorRef<T>, msg: Message<T>) {
+    pub(crate) fn send(&self, self_ref: ActorRef<T>, msg: Message<T>) {
         let ch = self.ch.clone();
         ch.send(msg);
 

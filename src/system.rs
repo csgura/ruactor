@@ -90,7 +90,7 @@ impl ActorSystem {
         }
 
         let system = self.clone();
-        let mbox = Mailbox::new(actor);
+        let mbox = Mailbox::new(actor, None);
 
         let actor_ref = ActorRef::new(path, Arc::new(mbox));
 
