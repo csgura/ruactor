@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use ruactor::*;
 
 #[derive(Clone)]
@@ -17,7 +19,9 @@ impl Actor for Hello {
     }
 
     fn on_enter(&self, context: &mut Context<Self::UserMessageType>) {
-        println!("default on enter");
+        println!("start timer");
+
+        context.start_single_timer(Duration::from_secs(1), TestMessage("timer".into()));
     }
 }
 #[derive(Clone, Debug)]

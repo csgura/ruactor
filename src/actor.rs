@@ -126,71 +126,18 @@ pub struct ActorCell<T: 'static + Send> {
 }
 
 impl<T: 'static + Send> ActorCell<T> {
-    fn with_context_transit(
-        &mut self,
-        self_ref: ActorRef<T>,
-        a: &Box<dyn Actor<UserMessageType = T>>,
-        f: fn(&mut Self, &Box<dyn Actor<UserMessageType = T>>, &mut Context<T>),
-    ) {
+    fn create_context(&mut self, self_ref: ActorRef<T>) -> Context<T> {
         let dt = Timer::default();
 
-        let mut context = Context {
-            self_ref: self_ref.clone(),
+        Context {
+            self_ref: self_ref,
             actor: None,
             stash: None,
             timer: replace(&mut self.timer, dt),
-        };
-
-        f(self, a, &mut context);
-
-        self.timer = context.timer;
-
-        if let Some(mess) = context.stash {
-            self.stash.push(mess);
-        }
-
-        if context.actor.is_some() {
-            let old_actor = replace(&mut self.actor, context.actor);
-
-            self.with_context_transit(
-                self_ref.clone(),
-                &old_actor.as_ref().unwrap(),
-                |cell, actor, ctx| actor.on_exit(ctx),
-            );
-
-            self.with_context_transit(
-                self_ref.clone(),
-                &old_actor.as_ref().unwrap(),
-                |cell, actor, ctx| {
-                    let actor = cell.actor.as_ref().unwrap();
-
-                    actor.on_enter(ctx)
-                },
-            );
         }
     }
 
-    fn with_context<F>(&mut self, self_ref: ActorRef<T>, f: F)
-    where
-        F: FnOnce(&mut Self, &mut Context<T>),
-    {
-        let dt = Timer::default();
-
-        let mut context = Context {
-            self_ref: self_ref.clone(),
-            actor: None,
-            stash: None,
-            timer: replace(&mut self.timer, dt),
-        };
-
-        if self.actor.is_none() {
-            self.actor = Some(self.prop.create());
-
-            self.actor.as_ref().unwrap().on_enter(&mut context);
-        }
-
-        f(self, &mut context);
-
+    fn drop_context(&mut self, self_ref: ActorRef<T>, context: Context<T>) {
         self.timer = context.timer;
 
         if let Some(mess) = context.stash {
@@ -200,24 +147,53 @@ impl<T: 'static + Send> ActorCell<T> {
         if context.actor.is_some() {
             let old_actor = replace(&mut self.actor, context.actor);
 
-            self.with_context_transit(
-                self_ref.clone(),
-                &old_actor.as_ref().unwrap(),
-                |cell, actor, ctx| actor.on_exit(ctx),
-            );
+            self.on_exit(old_actor, self_ref.clone());
 
-            self.with_context_transit(
-                self_ref.clone(),
-                &old_actor.as_ref().unwrap(),
-                |cell, actor, ctx| {
-                    let actor = cell.actor.as_ref().unwrap();
-                    actor.on_enter(ctx)
-                },
-            );
+            self.on_enter(self_ref.clone());
+        }
+    }
+
+    fn on_exit(
+        &mut self,
+        old_actor: Option<Box<dyn Actor<UserMessageType = T>>>,
+        self_ref: ActorRef<T>,
+    ) {
+        let mut context = self.create_context(self_ref.clone());
+
+        if let Some(actor) = old_actor {
+            actor.on_exit(&mut context);
+
+            self.drop_context(self_ref, context);
+        }
+    }
+
+    fn on_enter(&mut self, self_ref: ActorRef<T>) {
+        let mut context = self.create_context(self_ref.clone());
+
+        if let Some(actor) = &self.actor {
+            actor.on_enter(&mut context);
+
+            self.drop_context(self_ref, context);
+        }
+    }
+
+    fn on_message(&mut self, self_ref: ActorRef<T>, message: Message<T>) {
+        let mut context = self.create_context(self_ref.clone());
+
+        if let Some(actor) = &self.actor {
+            actor.on_message(&mut context, message);
+
+            self.drop_context(self_ref, context);
         }
     }
 
     async fn actor_loop(&mut self, self_ref: ActorRef<T>) {
+        if self.actor.is_none() {
+            self.actor = Some(self.prop.create());
+
+            self.on_enter(self_ref.clone());
+        }
+
         let num_msg = self_ref.mbox.num_msg.clone();
 
         // let mut actor = cell.actor;
@@ -231,10 +207,7 @@ impl<T: 'static + Send> ActorCell<T> {
         while let Some(msg) = self.ch.recv().await {
             num_msg.fetch_sub(1, Ordering::SeqCst);
 
-            self.with_context(self_ref.clone(), |cell, ctx| {
-                let actor = cell.actor.as_ref().unwrap();
-                actor.on_message(ctx, msg);
-            });
+            self.on_message(self_ref.clone(), msg);
 
             if num_msg.load(Ordering::SeqCst) == 0 {
                 break;
