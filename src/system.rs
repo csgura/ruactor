@@ -1,4 +1,4 @@
-use std::{any::Any, collections::HashMap, sync::Arc};
+use std::{any::Any, collections::HashMap, marker::PhantomData, sync::Arc};
 
 use tokio::sync::RwLock;
 
@@ -11,18 +11,22 @@ use crate::{
 
 /// Events that this actor system will send
 
-pub trait Prop<A: Actor> {
+pub trait Prop<A: Actor>: 'static + Send {
     fn create(&self) -> A;
 }
 
 impl<A, F> Prop<A> for F
 where
     A: Actor,
-    F: Fn() -> A,
+    F: Fn() -> A + 'static + Send,
 {
     fn create(&self) -> A {
         self()
     }
+}
+
+pub trait PropDyn<T: 'static + Send>: Send + 'static {
+    fn create(&self) -> Box<dyn Actor<UserMessageType = T>>;
 }
 
 #[derive(Error, Debug)]

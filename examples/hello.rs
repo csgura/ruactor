@@ -15,6 +15,10 @@ impl Actor for Hello {
     ) {
         println!("receive message {:?}", message);
     }
+
+    fn on_enter(&self, context: &mut Context<Self::UserMessageType>) {
+        println!("default on enter");
+    }
 }
 #[derive(Clone, Debug)]
 struct TestMessage(String);

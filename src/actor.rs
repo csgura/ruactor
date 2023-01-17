@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    marker::PhantomData,
     mem::replace,
     sync::{
         atomic::{AtomicBool, AtomicU32, Ordering},
@@ -10,7 +11,10 @@ use std::{
 
 use tokio::{sync::Mutex, time::Sleep};
 
-use crate::{path::ActorPath, system::Prop};
+use crate::{
+    path::ActorPath,
+    system::{Prop, PropDyn},
+};
 
 pub struct ActorRef<T: 'static + Send> {
     mbox: Arc<Mailbox<T>>,
@@ -114,7 +118,8 @@ pub trait Actor: Send + 'static {
 }
 
 pub struct ActorCell<T: 'static + Send> {
-    actor: Box<dyn Actor<UserMessageType = T>>,
+    actor: Option<Box<dyn Actor<UserMessageType = T>>>,
+    prop: Box<dyn PropDyn<T>>,
     ch: tokio::sync::mpsc::UnboundedReceiver<Message<T>>,
     stash: Vec<T>,
     timer: Timer<T>,
@@ -144,16 +149,24 @@ impl<T: 'static + Send> ActorCell<T> {
             self.stash.push(mess);
         }
 
-        if let Some(new_actor) = context.actor {
-            let old_actor = replace(&mut self.actor, new_actor);
+        if context.actor.is_some() {
+            let old_actor = replace(&mut self.actor, context.actor);
 
-            self.with_context_transit(self_ref.clone(), &old_actor, |cell, actor, ctx| {
-                actor.on_exit(ctx)
-            });
+            self.with_context_transit(
+                self_ref.clone(),
+                &old_actor.as_ref().unwrap(),
+                |cell, actor, ctx| actor.on_exit(ctx),
+            );
 
-            self.with_context_transit(self_ref.clone(), &old_actor, |cell, actor, ctx| {
-                cell.actor.on_enter(ctx)
-            });
+            self.with_context_transit(
+                self_ref.clone(),
+                &old_actor.as_ref().unwrap(),
+                |cell, actor, ctx| {
+                    let actor = cell.actor.as_ref().unwrap();
+
+                    actor.on_enter(ctx)
+                },
+            );
         }
     }
 
@@ -170,6 +183,12 @@ impl<T: 'static + Send> ActorCell<T> {
             timer: replace(&mut self.timer, dt),
         };
 
+        if self.actor.is_none() {
+            self.actor = Some(self.prop.create());
+
+            self.actor.as_ref().unwrap().on_enter(&mut context);
+        }
+
         f(self, &mut context);
 
         self.timer = context.timer;
@@ -178,16 +197,23 @@ impl<T: 'static + Send> ActorCell<T> {
             self.stash.push(mess);
         }
 
-        if let Some(new_actor) = context.actor {
-            let old_actor = replace(&mut self.actor, new_actor);
+        if context.actor.is_some() {
+            let old_actor = replace(&mut self.actor, context.actor);
 
-            self.with_context_transit(self_ref.clone(), &old_actor, |cell, actor, ctx| {
-                actor.on_exit(ctx)
-            });
+            self.with_context_transit(
+                self_ref.clone(),
+                &old_actor.as_ref().unwrap(),
+                |cell, actor, ctx| actor.on_exit(ctx),
+            );
 
-            self.with_context_transit(self_ref.clone(), &old_actor, |cell, actor, ctx| {
-                cell.actor.on_enter(ctx)
-            });
+            self.with_context_transit(
+                self_ref.clone(),
+                &old_actor.as_ref().unwrap(),
+                |cell, actor, ctx| {
+                    let actor = cell.actor.as_ref().unwrap();
+                    actor.on_enter(ctx)
+                },
+            );
         }
     }
 
@@ -206,7 +232,8 @@ impl<T: 'static + Send> ActorCell<T> {
             num_msg.fetch_sub(1, Ordering::SeqCst);
 
             self.with_context(self_ref.clone(), |cell, ctx| {
-                cell.actor.on_message(ctx, msg);
+                let actor = cell.actor.as_ref().unwrap();
+                actor.on_message(ctx, msg);
             });
 
             if num_msg.load(Ordering::SeqCst) == 0 {
@@ -234,21 +261,38 @@ impl<T: 'static + Send> Clone for Mailbox<T> {
     }
 }
 
+struct PropWrap<A: Actor, P: Prop<A>> {
+    prop: P,
+    phantom: PhantomData<A>,
+}
+
+impl<A: Actor, P: Prop<A>> PropDyn<A::UserMessageType> for PropWrap<A, P> {
+    fn create(&self) -> Box<dyn Actor<UserMessageType = A::UserMessageType>> {
+        Box::new(self.prop.create())
+    }
+}
+
 impl<T: 'static + Send> Mailbox<T> {
     pub fn new<P, A>(p: P) -> Mailbox<T>
     where
         P: Prop<A>,
         A: Actor<UserMessageType = T>,
     {
+        let pdyn = PropWrap {
+            prop: p,
+            phantom: PhantomData,
+        };
+
         let ch = tokio::sync::mpsc::unbounded_channel::<Message<T>>();
 
         let cell = ActorCell {
-            actor: Box::new(p.create()),
+            actor: None,
             ch: ch.1,
             stash: Vec::new(),
             timer: Timer {
                 list: HashMap::new(),
             },
+            prop: Box::new(pdyn),
         };
 
         let mbox = Mailbox {
