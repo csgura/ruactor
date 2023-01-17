@@ -53,6 +53,7 @@ impl<T: 'static + Send> Mailbox<T> {
             },
             prop: Box::new(pdyn),
             receive_timeout: None,
+            childrens: HashMap::new(),
         };
 
         let mbox = Mailbox {
@@ -69,21 +70,21 @@ impl<T: 'static + Send> Mailbox<T> {
         let mut owned = false;
 
         if let Ok(mut cell) = self.cell.try_lock() {
-            println!("start receive loop");
+            //println!("start receive loop");
 
             owned = true;
             self.status.store(true, Ordering::SeqCst);
             cell.actor_loop(self_ref.clone()).await;
             self.status.store(false, Ordering::SeqCst);
-            println!("end receive loop");
+            //println!("end receive loop");
         } else {
-            println!("lock failed");
+            //println!("lock failed");
         }
 
         if owned {
             let num_msg = self.num_msg.load(Ordering::SeqCst);
             if num_msg > 0 {
-                println!("num msg = {}", num_msg);
+                //println!("num msg = {}", num_msg);
                 //self.receive().await;
                 self.schedule(self_ref.clone());
             }
@@ -92,7 +93,7 @@ impl<T: 'static + Send> Mailbox<T> {
 
     pub fn schedule(&self, self_ref: ActorRef<T>) {
         if !self.status.load(Ordering::SeqCst) {
-            println!("schedule");
+            //println!("schedule");
             let mut cl: Mailbox<T> = self.clone();
 
             tokio::spawn(async move {
@@ -101,7 +102,7 @@ impl<T: 'static + Send> Mailbox<T> {
                 //actor_loop( &mut cell ).await;
             });
         } else {
-            println!("not schedule");
+            //println!("not schedule");
         }
     }
 

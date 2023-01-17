@@ -7,6 +7,30 @@ struct Hello {
     counter: u32,
 }
 
+struct Child {
+    counter: u32,
+}
+
+impl Actor for Child {
+    type UserMessageType = TestMessage;
+
+    fn on_message(
+        &self,
+        context: &mut Context<Self::UserMessageType>,
+        message: Self::UserMessageType,
+    ) {
+        println!(
+            "actor = {}, receive message at Child {:?} : {}",
+            context.self_ref(),
+            message,
+            self.counter
+        );
+        context.transit(Child {
+            counter: self.counter + 1,
+        })
+    }
+}
+
 impl Actor for Hello {
     type UserMessageType = TestMessage;
 
@@ -16,6 +40,13 @@ impl Actor for Hello {
         message: Self::UserMessageType,
     ) {
         println!("receive message {:?}", message);
+        match message {
+            TestMessage::Hello(key) => {
+                let child = context.get_or_create_child(key.clone(), || Child { counter: 0 });
+                child.tell(TestMessage::Hello(key));
+            }
+            _ => println!("ignore"),
+        }
     }
 
     fn on_enter(&self, context: &mut Context<Self::UserMessageType>) {
@@ -24,12 +55,15 @@ impl Actor for Hello {
         context.start_single_timer(
             "alarm".into(),
             Duration::from_secs(1),
-            TestMessage("timer".into()),
+            TestMessage::Timer("timer".into()),
         );
     }
 }
 #[derive(Clone, Debug)]
-struct TestMessage(String);
+enum TestMessage {
+    Hello(String),
+    Timer(String),
+}
 
 #[tokio::main]
 async fn main() {
@@ -42,7 +76,13 @@ async fn main() {
 
     tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
 
-    let msg_a = TestMessage("hello world!".to_string());
+    let msg_a = TestMessage::Hello("hello world!".to_string());
+    actor_ref.tell(msg_a);
+
+    let msg_a = TestMessage::Hello("hello world!".to_string());
+    actor_ref.tell(msg_a);
+
+    let msg_a = TestMessage::Hello("hello world!".to_string());
     actor_ref.tell(msg_a);
 
     tokio::time::sleep(tokio::time::Duration::from_secs(1000)).await;

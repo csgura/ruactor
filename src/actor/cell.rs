@@ -1,5 +1,7 @@
 use std::alloc::System;
+use std::any::Any;
 use std::collections::HashMap;
+use std::hash::Hash;
 use std::mem::replace;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -34,22 +36,26 @@ pub struct ActorCell<T: 'static + Send> {
     pub(crate) stash: Vec<T>,
     pub(crate) timer: Timer<T>,
     pub(crate) receive_timeout: Option<Duration>,
+    pub(crate) childrens: HashMap<String, Box<dyn Any + Send + Sync + 'static>>,
 }
 
 impl<T: 'static + Send> ActorCell<T> {
     fn create_context(&mut self, self_ref: ActorRef<T>) -> Context<T> {
         let dt = Timer::default();
+        let dc = HashMap::new();
 
         Context {
             self_ref: self_ref,
             actor: None,
             stash: None,
             timer: replace(&mut self.timer, dt),
+            childrens: replace(&mut self.childrens, dc),
         }
     }
 
     fn drop_context(&mut self, self_ref: ActorRef<T>, context: Context<T>) {
         self.timer = context.timer;
+        self.childrens = context.childrens;
 
         if let Some(mess) = context.stash {
             self.stash.push(mess);

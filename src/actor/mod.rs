@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    fmt::Display,
     marker::PhantomData,
     mem::replace,
     sync::{
@@ -23,6 +24,12 @@ use crate::{
 pub struct ActorRef<T: 'static + Send> {
     mbox: Arc<Mailbox<T>>,
     path: ActorPath,
+}
+
+impl<T: 'static + Send> Display for ActorRef<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.path())
+    }
 }
 
 pub use cell::ActorCell;
@@ -78,9 +85,7 @@ pub enum Message<T: 'static + Send> {
 pub trait Actor: Send + 'static {
     type UserMessageType: 'static + Send;
 
-    fn on_enter(&self, context: &mut Context<Self::UserMessageType>) {
-        println!("default on enter");
-    }
+    fn on_enter(&self, context: &mut Context<Self::UserMessageType>) {}
 
     fn on_exit(&self, context: &mut Context<Self::UserMessageType>) {}
 

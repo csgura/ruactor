@@ -109,6 +109,16 @@ impl std::ops::Div<&str> for ActorPath {
     }
 }
 
+impl std::ops::Div<String> for ActorPath {
+    type Output = ActorPath;
+
+    fn div(self, rhs: String) -> Self::Output {
+        let mut keys = self.0;
+        keys.push(rhs);
+        ActorPath(keys)
+    }
+}
+
 impl std::fmt::Display for ActorPath {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), Error> {
         match self.level().cmp(&1) {
