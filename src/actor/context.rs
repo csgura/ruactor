@@ -1,6 +1,6 @@
 use std::{
-    any::Any,
     collections::HashMap,
+    marker::PhantomData,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -8,20 +8,47 @@ use std::{
 use crate::{Actor, Prop};
 
 use super::{
-    ActorRef, ChildContainer, InternalMessage, Mailbox, Message, ParentRef, SystemMessage, Timer,
+    dispatcher::TimerMessage, ActorRef, ChildContainer, Mailbox, Message, ParentRef, Timer,
 };
 
-pub struct Context<T: 'static + Send> {
-    pub(crate) parent: Option<Box<dyn ParentRef>>,
+pub struct ActorContext<T: 'static + Send> {
     pub(crate) self_ref: ActorRef<T>,
     pub(crate) actor: Option<Box<dyn Actor<UserMessageType = T>>>,
-    pub(crate) stash: Option<T>,
+    pub(crate) cell: ActorCell<T>,
+}
+
+pub struct ActorCell<T: 'static + Send> {
+    pub(crate) parent: Option<Box<dyn ParentRef>>,
+    pub(crate) stash: Vec<T>,
     pub(crate) timer: Timer<T>,
     pub(crate) childrens: HashMap<String, ChildContainer>,
     pub(crate) receive_timeout: Option<Duration>,
+    pub(crate) timer_gen: u32,
 }
 
-impl<T: 'static + Send> Context<T> {
+impl<T: 'static + Send> Default for ActorCell<T> {
+    fn default() -> Self {
+        Self {
+            parent: Default::default(),
+            stash: Default::default(),
+            timer: Default::default(),
+            childrens: Default::default(),
+            receive_timeout: Default::default(),
+            timer_gen: Default::default(),
+        }
+    }
+}
+
+impl<T: 'static + Send> ActorCell<T> {
+    pub(crate) fn new(parent: Option<Box<dyn ParentRef>>) -> Self {
+        Self {
+            parent,
+            ..Default::default()
+        }
+    }
+}
+
+impl<T: 'static + Send> ActorContext<T> {
     pub fn self_ref(&mut self) -> ActorRef<T> {
         self.self_ref.clone()
     }
@@ -30,20 +57,45 @@ impl<T: 'static + Send> Context<T> {
         self.actor = Some(Box::new(new_actor));
     }
 
-    pub fn start_single_timer(&mut self, name: String, d: Duration, t: T) {
+    fn next_timer_gen(&mut self) -> u32 {
+        let ret = self.cell.timer_gen;
+
+        self.cell.timer_gen = match self.cell.timer_gen {
+            u32::MAX => 0,
+            _ => self.cell.timer_gen + 1,
+        };
+
+        ret
+    }
+    pub fn start_single_timer(&mut self, name: String, d: Duration, t: T)
+    where
+        T: Clone,
+    {
+        let gen = self.next_timer_gen();
+
+        self.cell.timer.list.insert(
+            name.clone(),
+            TimerMessage {
+                gen: gen,
+                phantom: PhantomData,
+            },
+        );
+
         let self_ref = self.self_ref.clone();
         tokio::spawn(async move {
             let s = tokio::time::sleep(d);
             s.await;
 
-            self_ref.send(Message::Timer(t));
+            self_ref.send(Message::Timer(name.clone(), 0, t));
         });
     }
 
-    pub fn cancel_timer(&mut self, name: String) {}
+    pub fn cancel_timer(&mut self, name: String) {
+        self.cell.timer.list.remove(&name);
+    }
 
     pub fn set_receive_timeout(&mut self, d: Duration) {
-        self.receive_timeout = Some(d);
+        self.cell.receive_timeout = Some(d);
         self.schedule_receive_timeout(d);
     }
 
@@ -60,12 +112,19 @@ impl<T: 'static + Send> Context<T> {
         });
     }
 
-    pub fn stash(&mut self, message: T) {}
+    pub fn stash(&mut self, message: T) {
+        self.cell.stash.push(message);
+    }
 
-    pub fn unstash_all(&mut self) {}
+    pub fn unstash_all(&mut self) {
+        while let Some(msg) = self.cell.stash.pop() {
+            self.self_ref.tell(msg);
+        }
+    }
 
     pub fn get_child<M: 'static + Send>(&self, name: String) -> Option<ActorRef<M>> {
         let ret = self
+            .cell
             .childrens
             .get(&name)
             .and_then(|any| any.actor_ref.downcast_ref::<ActorRef<M>>().cloned());
@@ -88,7 +147,7 @@ impl<T: 'static + Send> Context<T> {
 
                 let actor_ref = ActorRef::new(cpath, Arc::new(mbox));
 
-                self.childrens.insert(
+                self.cell.childrens.insert(
                     name,
                     ChildContainer {
                         actor_ref: Box::new(actor_ref.clone()),

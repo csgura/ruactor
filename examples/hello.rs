@@ -4,7 +4,7 @@ use ruactor::*;
 
 #[derive(Clone)]
 struct Hello {
-    counter: u32,
+    _counter: u32,
 }
 
 struct Child {
@@ -18,30 +18,21 @@ impl Actor for Grandson {
 
     fn on_message(
         &self,
-        context: &mut Context<Self::UserMessageType>,
-        message: Self::UserMessageType,
+        _context: &mut ActorContext<Self::UserMessageType>,
+        _message: Self::UserMessageType,
     ) {
         todo!()
     }
 
-    fn on_enter(&self, context: &mut Context<Self::UserMessageType>) {}
-
-    fn on_exit(&self, context: &mut Context<Self::UserMessageType>) {
+    fn on_exit(&self, _context: &mut ActorContext<Self::UserMessageType>) {
         println!("Grandson exit");
-    }
-
-    fn on_system_message(
-        &self,
-        context: &mut Context<Self::UserMessageType>,
-        message: SystemMessage,
-    ) {
     }
 }
 
 impl Actor for Child {
     type UserMessageType = TestMessage;
 
-    fn on_enter(&self, context: &mut Context<Self::UserMessageType>) {
+    fn on_enter(&self, context: &mut ActorContext<Self::UserMessageType>) {
         context.get_or_create_child("cc".into(), || Grandson {});
 
         context.set_receive_timeout(Duration::from_secs(1));
@@ -49,7 +40,7 @@ impl Actor for Child {
 
     fn on_system_message(
         &self,
-        context: &mut Context<Self::UserMessageType>,
+        context: &mut ActorContext<Self::UserMessageType>,
         message: SystemMessage,
     ) {
         match message {
@@ -62,7 +53,7 @@ impl Actor for Child {
 
     fn on_message(
         &self,
-        context: &mut Context<Self::UserMessageType>,
+        context: &mut ActorContext<Self::UserMessageType>,
         message: Self::UserMessageType,
     ) {
         println!(
@@ -82,7 +73,7 @@ impl Actor for Hello {
 
     fn on_message(
         &self,
-        context: &mut Context<Self::UserMessageType>,
+        context: &mut ActorContext<Self::UserMessageType>,
         message: Self::UserMessageType,
     ) {
         println!("receive message {:?}", message);
@@ -97,7 +88,7 @@ impl Actor for Hello {
         }
     }
 
-    fn on_enter(&self, context: &mut Context<Self::UserMessageType>) {
+    fn on_enter(&self, context: &mut ActorContext<Self::UserMessageType>) {
         println!("start timer");
 
         context.start_single_timer(
@@ -118,7 +109,7 @@ async fn main() {
     let system = ActorSystem::new("test");
 
     let actor_ref = system
-        .create_actor("test-actor", || Hello { counter: 0 })
+        .create_actor("test-actor", || Hello { _counter: 0 })
         .await
         .unwrap();
 

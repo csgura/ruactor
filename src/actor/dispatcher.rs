@@ -1,26 +1,22 @@
-use std::alloc::System;
-use std::any::Any;
 use std::collections::HashMap;
-use std::hash::Hash;
+
+use std::marker::PhantomData;
 use std::mem::replace;
 use std::sync::atomic::Ordering;
-use std::time::Duration;
 use std::time::Instant;
 
+use super::context::ActorCell;
+use super::context::ActorContext;
 use super::Actor;
 use super::ActorRef;
-use super::ChildContainer;
-use super::Context;
-use super::InternalActorRef;
+
 use super::InternalMessage;
 use super::Message;
-use super::ParentRef;
-use super::SystemMessage;
 use crate::system::PropDyn;
 
 pub struct TimerMessage<T: 'static> {
-    pub(crate) msg: T,
-    pub(crate) repeat: bool,
+    pub(crate) gen: u32,
+    pub(crate) phantom: PhantomData<T>,
 }
 
 pub struct Timer<T: 'static> {
@@ -35,44 +31,27 @@ impl<T: 'static> Default for Timer<T> {
     }
 }
 
-pub struct ActorCell<T: 'static + Send> {
-    pub(crate) parent: Option<Box<dyn ParentRef>>,
+pub struct Dispatcher<T: 'static + Send> {
     pub(crate) actor: Option<Box<dyn Actor<UserMessageType = T>>>,
     pub(crate) prop: Box<dyn PropDyn<T>>,
     pub(crate) ch: tokio::sync::mpsc::UnboundedReceiver<Message<T>>,
-    pub(crate) stash: Vec<T>,
-    pub(crate) timer: Timer<T>,
-    pub(crate) receive_timeout: Option<Duration>,
-    pub(crate) childrens: HashMap<String, ChildContainer>,
     pub(crate) last_message_timestamp: Instant,
+    pub(crate) cell: ActorCell<T>,
 }
 
-impl<T: 'static + Send> ActorCell<T> {
-    fn create_context(&mut self, self_ref: ActorRef<T>) -> Context<T> {
-        let dt = Timer::default();
-        let dc = HashMap::new();
+impl<T: 'static + Send> Dispatcher<T> {
+    fn create_context(&mut self, self_ref: ActorRef<T>) -> ActorContext<T> {
+        let dc = ActorCell::default();
 
-        let dp = None;
-        Context {
-            parent: replace(&mut self.parent, dp),
+        ActorContext {
             self_ref: self_ref,
             actor: None,
-            stash: None,
-            timer: replace(&mut self.timer, dt),
-            childrens: replace(&mut self.childrens, dc),
-            receive_timeout: self.receive_timeout.clone(),
+            cell: replace(&mut self.cell, dc),
         }
     }
 
-    fn drop_context(&mut self, self_ref: ActorRef<T>, context: Context<T>) {
-        self.parent = context.parent;
-        self.timer = context.timer;
-        self.childrens = context.childrens;
-        self.receive_timeout = context.receive_timeout;
-
-        if let Some(mess) = context.stash {
-            self.stash.push(mess);
-        }
+    fn drop_context(&mut self, self_ref: ActorRef<T>, context: ActorContext<T>) {
+        self.cell = context.cell;
 
         if context.actor.is_some() {
             let old_actor = replace(&mut self.actor, context.actor);
@@ -121,15 +100,19 @@ impl<T: 'static + Send> ActorCell<T> {
 
                     actor.on_message(&mut context, msg)
                 }
-                Message::Timer(msg) => {
+                Message::Timer(key, gen, msg) => {
                     self.last_message_timestamp = Instant::now();
-                    actor.on_message(&mut context, msg)
+
+                    match context.cell.timer.list.get(&key) {
+                        Some(info) if info.gen == gen => actor.on_message(&mut context, msg),
+                        _ => {}
+                    };
                 }
                 Message::ReceiveTimeout(exp) => {
                     let num_msg = self_ref.mbox.num_msg.clone();
 
-                    if num_msg.load(Ordering::SeqCst) == 0 {
-                        if let Some(tmout) = self.receive_timeout {
+                    if let Some(tmout) = context.cell.receive_timeout {
+                        if num_msg.load(Ordering::SeqCst) == 0 {
                             if exp > self.last_message_timestamp {
                                 if exp - self.last_message_timestamp >= tmout {
                                     actor.on_system_message(
@@ -145,14 +128,17 @@ impl<T: 'static + Send> ActorCell<T> {
                             } else {
                                 context.schedule_receive_timeout(tmout);
                             }
+                        } else {
+                            context.schedule_receive_timeout(tmout);
                         }
                     }
                 }
+
                 Message::Internal(super::InternalMessage::ChildTerminate(msg)) => {
-                    println!("child terminated : {}", msg);
+                    //println!("child terminated : {}", msg);
                     let key = msg.key();
 
-                    context.childrens.remove(&key);
+                    context.cell.childrens.remove(&key);
                     // println!("after children size =  {}", context.childrens.len());
                 }
                 Message::Terminate => {
@@ -194,19 +180,18 @@ impl<T: 'static + Send> ActorCell<T> {
 
                     self.ch.close();
 
-                    if self.parent.is_some() {
-                        self.parent.as_ref().unwrap().send_internal_message(
+                    if self.cell.parent.is_some() {
+                        self.cell.parent.as_ref().unwrap().send_internal_message(
                             InternalMessage::ChildTerminate(self_ref.path.clone()),
                         )
                     }
 
-                    self.childrens.iter().for_each(|x| {
-                        println!("try downcast {:?}", x.1.type_id());
+                    self.cell.childrens.iter().for_each(|x| {
                         let child_ref = x.1.stop_ref.as_ref();
                         child_ref.stop();
                     });
 
-                    self.childrens.clear();
+                    self.cell.childrens.clear();
 
                     break;
                 }

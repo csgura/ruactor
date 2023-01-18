@@ -1,4 +1,4 @@
-use std::{any::Any, collections::HashMap, marker::PhantomData, sync::Arc};
+use std::{any::Any, collections::HashMap, sync::Arc};
 
 use tokio::sync::RwLock;
 
@@ -89,7 +89,6 @@ impl ActorSystem {
             return Err(ActorError::Exists(path));
         }
 
-        let system = self.clone();
         let mbox = Mailbox::new(actor, None);
 
         let actor_ref = ActorRef::new(path, Arc::new(mbox));

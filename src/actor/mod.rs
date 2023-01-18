@@ -1,21 +1,14 @@
 use std::{
     any::Any,
-    collections::HashMap,
-    fmt::Display,
+    fmt::{Debug, Display},
     marker::PhantomData,
-    mem::replace,
-    sync::{
-        atomic::{AtomicBool, AtomicU32, Ordering},
-        Arc,
-    },
-    time::{Duration, Instant},
+    sync::Arc,
+    time::Instant,
 };
 
-mod cell;
 mod context;
+mod dispatcher;
 mod mailbox;
-
-use tokio::{sync::Mutex, time::Sleep};
 
 use crate::{
     path::ActorPath,
@@ -53,7 +46,7 @@ impl<T: 'static + Send> Display for ActorRef<T> {
     }
 }
 
-pub use cell::ActorCell;
+pub use dispatcher::Dispatcher;
 pub use mailbox::Mailbox;
 
 impl<T: 'static + Send> ActorRef<T> {
@@ -88,8 +81,8 @@ impl<T: 'static + Send> ActorRef<T> {
     }
 }
 
-pub use cell::Timer;
-pub use context::Context;
+pub use context::ActorContext;
+pub use dispatcher::Timer;
 
 #[derive(Debug)]
 pub enum SystemMessage {
@@ -100,7 +93,7 @@ pub enum SystemMessage {
 pub(crate) enum Message<T: 'static + Send> {
     System(SystemMessage),
     User(T),
-    Timer(T),
+    Timer(String, u32, T),
     ReceiveTimeout(Instant),
     Terminate,
     Internal(InternalMessage),
@@ -114,20 +107,20 @@ pub(crate) enum InternalMessage {
 pub trait Actor: Send + 'static {
     type UserMessageType: 'static + Send;
 
-    fn on_enter(&self, context: &mut Context<Self::UserMessageType>) {}
+    fn on_enter(&self, _context: &mut ActorContext<Self::UserMessageType>) {}
 
-    fn on_exit(&self, context: &mut Context<Self::UserMessageType>) {}
+    fn on_exit(&self, _context: &mut ActorContext<Self::UserMessageType>) {}
 
     fn on_message(
         &self,
-        context: &mut Context<Self::UserMessageType>,
+        context: &mut ActorContext<Self::UserMessageType>,
         message: Self::UserMessageType,
     );
 
     fn on_system_message(
         &self,
-        context: &mut Context<Self::UserMessageType>,
-        message: SystemMessage,
+        _context: &mut ActorContext<Self::UserMessageType>,
+        _message: SystemMessage,
     ) {
     }
 }

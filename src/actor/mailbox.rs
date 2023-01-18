@@ -1,5 +1,4 @@
 use std::{
-    collections::HashMap,
     marker::PhantomData,
     sync::{
         atomic::{AtomicBool, AtomicU32, Ordering},
@@ -12,13 +11,13 @@ use tokio::sync::Mutex;
 
 use crate::{Actor, Prop};
 
-use super::{ActorCell, ActorRef, Message, ParentRef, PropWrap, Timer};
+use super::{context::ActorCell, ActorRef, Dispatcher, Message, ParentRef, PropWrap};
 
 pub struct Mailbox<T: 'static + Send> {
     pub(crate) ch: tokio::sync::mpsc::UnboundedSender<Message<T>>,
     pub(crate) num_msg: Arc<AtomicU32>,
     pub(crate) status: Arc<AtomicBool>,
-    pub(crate) cell: Arc<Mutex<ActorCell<T>>>,
+    pub(crate) cell: Arc<Mutex<Dispatcher<T>>>,
 }
 
 impl<T: 'static + Send> Clone for Mailbox<T> {
@@ -45,18 +44,12 @@ impl<T: 'static + Send> Mailbox<T> {
 
         let ch = tokio::sync::mpsc::unbounded_channel::<Message<T>>();
 
-        let cell = ActorCell {
-            parent: parent,
+        let cell = Dispatcher {
             actor: None,
             ch: ch.1,
-            stash: Vec::new(),
-            timer: Timer {
-                list: HashMap::new(),
-            },
             prop: Box::new(pdyn),
-            receive_timeout: None,
-            childrens: HashMap::new(),
             last_message_timestamp: Instant::now(),
+            cell: ActorCell::new(parent),
         };
 
         let mbox = Mailbox {
@@ -97,7 +90,7 @@ impl<T: 'static + Send> Mailbox<T> {
     pub(crate) fn schedule(&self, self_ref: ActorRef<T>) {
         if !self.status.load(Ordering::SeqCst) {
             //println!("schedule");
-            let mut cl: Mailbox<T> = self.clone();
+            let cl: Mailbox<T> = self.clone();
 
             tokio::spawn(async move {
                 cl.receive(self_ref.clone()).await
@@ -111,9 +104,14 @@ impl<T: 'static + Send> Mailbox<T> {
 
     pub(crate) fn send(&self, self_ref: ActorRef<T>, msg: Message<T>) {
         let ch = self.ch.clone();
-        ch.send(msg);
-
-        self.num_msg.fetch_add(1, Ordering::SeqCst);
-        self.schedule(self_ref);
+        match ch.send(msg) {
+            Ok(_) => {
+                self.num_msg.fetch_add(1, Ordering::SeqCst);
+                self.schedule(self_ref);
+            }
+            Err(_) => {
+                log::warn!("dead letter message to {} ", self_ref);
+            }
+        }
     }
 }
