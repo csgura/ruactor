@@ -11,10 +11,39 @@ struct Child {
     counter: u32,
 }
 
+struct Grandson {}
+
+impl Actor for Grandson {
+    type UserMessageType = TestMessage;
+
+    fn on_message(
+        &self,
+        context: &mut Context<Self::UserMessageType>,
+        message: Self::UserMessageType,
+    ) {
+        todo!()
+    }
+
+    fn on_enter(&self, context: &mut Context<Self::UserMessageType>) {}
+
+    fn on_exit(&self, context: &mut Context<Self::UserMessageType>) {
+        println!("Grandson exit");
+    }
+
+    fn on_system_message(
+        &self,
+        context: &mut Context<Self::UserMessageType>,
+        message: SystemMessage,
+    ) {
+    }
+}
+
 impl Actor for Child {
     type UserMessageType = TestMessage;
 
     fn on_enter(&self, context: &mut Context<Self::UserMessageType>) {
+        context.get_or_create_child("cc".into(), || Grandson {});
+
         context.set_receive_timeout(Duration::from_secs(1));
     }
 

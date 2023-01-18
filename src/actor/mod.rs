@@ -1,4 +1,5 @@
 use std::{
+    any::Any,
     collections::HashMap,
     fmt::Display,
     marker::PhantomData,
@@ -21,9 +22,19 @@ use crate::{
     system::{Prop, PropDyn},
 };
 
+pub(crate) trait InternalActorRef: 'static + Send {
+    fn stop(&self);
+}
+
 pub struct ActorRef<T: 'static + Send> {
     mbox: Arc<Mailbox<T>>,
     path: ActorPath,
+}
+
+impl<T: 'static + Send> InternalActorRef for ActorRef<T> {
+    fn stop(&self) {
+        self.send(Message::Terminate);
+    }
 }
 
 pub(crate) trait ParentRef: 'static + Send {
@@ -91,7 +102,7 @@ pub(crate) enum Message<T: 'static + Send> {
     User(T),
     Timer(T),
     ReceiveTimeout(Instant),
-    PoisonPil,
+    Terminate,
     Internal(InternalMessage),
 }
 
@@ -130,4 +141,9 @@ impl<A: Actor, P: Prop<A>> PropDyn<A::UserMessageType> for PropWrap<A, P> {
     fn create(&self) -> Box<dyn Actor<UserMessageType = A::UserMessageType>> {
         Box::new(self.prop.create())
     }
+}
+
+pub(crate) struct ChildContainer {
+    actor_ref: Box<dyn Any + Send + Sync + 'static>,
+    stop_ref: Box<dyn InternalActorRef>,
 }

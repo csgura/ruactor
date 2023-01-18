@@ -7,7 +7,9 @@ use std::{
 
 use crate::{Actor, Prop};
 
-use super::{ActorRef, Mailbox, Message, ParentRef, SystemMessage, Timer};
+use super::{
+    ActorRef, ChildContainer, InternalMessage, Mailbox, Message, ParentRef, SystemMessage, Timer,
+};
 
 pub struct Context<T: 'static + Send> {
     pub(crate) parent: Option<Box<dyn ParentRef>>,
@@ -15,7 +17,7 @@ pub struct Context<T: 'static + Send> {
     pub(crate) actor: Option<Box<dyn Actor<UserMessageType = T>>>,
     pub(crate) stash: Option<T>,
     pub(crate) timer: Timer<T>,
-    pub(crate) childrens: HashMap<String, Box<dyn Any + Send + Sync + 'static>>,
+    pub(crate) childrens: HashMap<String, ChildContainer>,
     pub(crate) receive_timeout: Option<Duration>,
 }
 
@@ -66,7 +68,7 @@ impl<T: 'static + Send> Context<T> {
         let ret = self
             .childrens
             .get(&name)
-            .and_then(|any| any.downcast_ref::<ActorRef<M>>().cloned());
+            .and_then(|any| any.actor_ref.downcast_ref::<ActorRef<M>>().cloned());
 
         ret
     }
@@ -86,19 +88,19 @@ impl<T: 'static + Send> Context<T> {
 
                 let actor_ref = ActorRef::new(cpath, Arc::new(mbox));
 
-                self.childrens.insert(name, Box::new(actor_ref.clone()));
+                self.childrens.insert(
+                    name,
+                    ChildContainer {
+                        actor_ref: Box::new(actor_ref.clone()),
+                        stop_ref: Box::new(actor_ref.clone()),
+                    },
+                );
                 actor_ref
             }
         }
     }
 
     pub fn stop_self(&mut self) {
-        self.self_ref.send(Message::PoisonPil);
-
-        if self.parent.is_some() {
-            self.parent.as_ref().unwrap().send_internal_message(
-                super::InternalMessage::ChildTerminate(self.self_ref.path.clone()),
-            )
-        }
+        self.self_ref.send(Message::Terminate);
     }
 }

@@ -9,7 +9,10 @@ use std::time::Instant;
 
 use super::Actor;
 use super::ActorRef;
+use super::ChildContainer;
 use super::Context;
+use super::InternalActorRef;
+use super::InternalMessage;
 use super::Message;
 use super::ParentRef;
 use super::SystemMessage;
@@ -40,7 +43,7 @@ pub struct ActorCell<T: 'static + Send> {
     pub(crate) stash: Vec<T>,
     pub(crate) timer: Timer<T>,
     pub(crate) receive_timeout: Option<Duration>,
-    pub(crate) childrens: HashMap<String, Box<dyn Any + Send + Sync + 'static>>,
+    pub(crate) childrens: HashMap<String, ChildContainer>,
     pub(crate) last_message_timestamp: Instant,
 }
 
@@ -123,20 +126,25 @@ impl<T: 'static + Send> ActorCell<T> {
                     actor.on_message(&mut context, msg)
                 }
                 Message::ReceiveTimeout(exp) => {
-                    if let Some(tmout) = self.receive_timeout {
-                        if exp > self.last_message_timestamp {
-                            if exp - self.last_message_timestamp >= tmout {
-                                actor.on_system_message(
-                                    &mut context,
-                                    super::SystemMessage::ReceiveTimeout,
-                                );
-                            } else {
-                                let exp = (self.last_message_timestamp + tmout) - Instant::now();
+                    let num_msg = self_ref.mbox.num_msg.clone();
 
-                                context.schedule_receive_timeout(exp);
+                    if num_msg.load(Ordering::SeqCst) == 0 {
+                        if let Some(tmout) = self.receive_timeout {
+                            if exp > self.last_message_timestamp {
+                                if exp - self.last_message_timestamp >= tmout {
+                                    actor.on_system_message(
+                                        &mut context,
+                                        super::SystemMessage::ReceiveTimeout,
+                                    );
+                                } else {
+                                    let exp =
+                                        (self.last_message_timestamp + tmout) - Instant::now();
+
+                                    context.schedule_receive_timeout(exp);
+                                }
+                            } else {
+                                context.schedule_receive_timeout(tmout);
                             }
-                        } else {
-                            context.schedule_receive_timeout(tmout);
                         }
                     }
                 }
@@ -147,7 +155,7 @@ impl<T: 'static + Send> ActorCell<T> {
                     context.childrens.remove(&key);
                     // println!("after children size =  {}", context.childrens.len());
                 }
-                Message::PoisonPil => {
+                Message::Terminate => {
                     // covered by actor loop
                 }
             }
@@ -176,9 +184,29 @@ impl<T: 'static + Send> ActorCell<T> {
             num_msg.fetch_sub(1, Ordering::SeqCst);
 
             match msg {
-                Message::PoisonPil => {
+                Message::Terminate => {
                     //println!("stop actor {}", self_ref);
+
+                    let da = None;
+                    let old_actor = replace(&mut self.actor, da);
+
+                    self.on_exit(old_actor, self_ref.clone());
+
                     self.ch.close();
+
+                    if self.parent.is_some() {
+                        self.parent.as_ref().unwrap().send_internal_message(
+                            InternalMessage::ChildTerminate(self_ref.path.clone()),
+                        )
+                    }
+
+                    self.childrens.iter().for_each(|x| {
+                        println!("try downcast {:?}", x.1.type_id());
+                        let child_ref = x.1.stop_ref.as_ref();
+                        child_ref.stop();
+                    });
+
+                    self.childrens.clear();
 
                     break;
                 }
