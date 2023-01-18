@@ -13,7 +13,7 @@ use super::{
 
 pub struct ActorContext<T: 'static + Send> {
     pub(crate) self_ref: ActorRef<T>,
-    pub(crate) actor: Option<Box<dyn Actor<UserMessageType = T>>>,
+    pub(crate) actor: Option<Box<dyn Actor<Message = T>>>,
     pub(crate) cell: ActorCell<T>,
 }
 
@@ -53,7 +53,7 @@ impl<T: 'static + Send> ActorContext<T> {
         self.self_ref.clone()
     }
 
-    pub fn transit<A: Actor<UserMessageType = T> + 'static>(&mut self, new_actor: A) {
+    pub fn transit<A: Actor<Message = T> + 'static>(&mut self, new_actor: A) {
         self.actor = Some(Box::new(new_actor));
     }
 
@@ -136,7 +136,7 @@ impl<T: 'static + Send> ActorContext<T> {
         &mut self,
         name: String,
         prop: P,
-    ) -> ActorRef<A::UserMessageType> {
+    ) -> ActorRef<A::Message> {
         let ret = self.get_child(name.clone());
         match ret {
             Some(actor_ref) => actor_ref,

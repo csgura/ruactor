@@ -32,7 +32,7 @@ impl<T: 'static> Default for Timer<T> {
 }
 
 pub struct Dispatcher<T: 'static + Send> {
-    pub(crate) actor: Option<Box<dyn Actor<UserMessageType = T>>>,
+    pub(crate) actor: Option<Box<dyn Actor<Message = T>>>,
     pub(crate) prop: Box<dyn PropDyn<T>>,
     pub(crate) ch: tokio::sync::mpsc::UnboundedReceiver<Message<T>>,
     pub(crate) last_message_timestamp: Instant,
@@ -62,11 +62,7 @@ impl<T: 'static + Send> Dispatcher<T> {
         }
     }
 
-    fn on_exit(
-        &mut self,
-        old_actor: Option<Box<dyn Actor<UserMessageType = T>>>,
-        self_ref: ActorRef<T>,
-    ) {
+    fn on_exit(&mut self, old_actor: Option<Box<dyn Actor<Message = T>>>, self_ref: ActorRef<T>) {
         let mut context = self.create_context(self_ref.clone());
 
         if let Some(actor) = old_actor {

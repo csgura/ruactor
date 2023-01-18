@@ -35,7 +35,7 @@ impl<T: 'static + Send> Mailbox<T> {
     pub(crate) fn new<P, A>(p: P, parent: Option<Box<dyn ParentRef>>) -> Mailbox<T>
     where
         P: Prop<A>,
-        A: Actor<UserMessageType = T>,
+        A: Actor<Message = T>,
     {
         let pdyn = PropWrap {
             prop: p,

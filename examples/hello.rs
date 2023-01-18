@@ -14,35 +14,27 @@ struct Child {
 struct Grandson {}
 
 impl Actor for Grandson {
-    type UserMessageType = TestMessage;
+    type Message = TestMessage;
 
-    fn on_message(
-        &self,
-        _context: &mut ActorContext<Self::UserMessageType>,
-        _message: Self::UserMessageType,
-    ) {
+    fn on_message(&self, _context: &mut ActorContext<Self::Message>, _message: Self::Message) {
         todo!()
     }
 
-    fn on_exit(&self, _context: &mut ActorContext<Self::UserMessageType>) {
+    fn on_exit(&self, _context: &mut ActorContext<Self::Message>) {
         println!("Grandson exit");
     }
 }
 
 impl Actor for Child {
-    type UserMessageType = TestMessage;
+    type Message = TestMessage;
 
-    fn on_enter(&self, context: &mut ActorContext<Self::UserMessageType>) {
+    fn on_enter(&self, context: &mut ActorContext<Self::Message>) {
         context.get_or_create_child("cc".into(), || Grandson {});
 
         context.set_receive_timeout(Duration::from_secs(1));
     }
 
-    fn on_system_message(
-        &self,
-        context: &mut ActorContext<Self::UserMessageType>,
-        message: SystemMessage,
-    ) {
+    fn on_system_message(&self, context: &mut ActorContext<Self::Message>, message: SystemMessage) {
         match message {
             SystemMessage::ReceiveTimeout => {
                 println!("{} receive tmout", context.self_ref());
@@ -51,11 +43,7 @@ impl Actor for Child {
         }
     }
 
-    fn on_message(
-        &self,
-        context: &mut ActorContext<Self::UserMessageType>,
-        message: Self::UserMessageType,
-    ) {
+    fn on_message(&self, context: &mut ActorContext<Self::Message>, message: Self::Message) {
         println!(
             "actor = {}, receive message at Child {:?} : {}",
             context.self_ref(),
@@ -69,13 +57,9 @@ impl Actor for Child {
 }
 
 impl Actor for Hello {
-    type UserMessageType = TestMessage;
+    type Message = TestMessage;
 
-    fn on_message(
-        &self,
-        context: &mut ActorContext<Self::UserMessageType>,
-        message: Self::UserMessageType,
-    ) {
+    fn on_message(&self, context: &mut ActorContext<Self::Message>, message: Self::Message) {
         println!("receive message {:?}", message);
         match message {
             TestMessage::Hello(key) => {
@@ -88,7 +72,7 @@ impl Actor for Hello {
         }
     }
 
-    fn on_enter(&self, context: &mut ActorContext<Self::UserMessageType>) {
+    fn on_enter(&self, context: &mut ActorContext<Self::Message>) {
         println!("start timer");
 
         context.start_single_timer(
@@ -110,7 +94,6 @@ async fn main() {
 
     let actor_ref = system
         .create_actor("test-actor", || Hello { _counter: 0 })
-        .await
         .unwrap();
 
     tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;

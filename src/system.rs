@@ -1,6 +1,6 @@
 use std::{any::Any, collections::HashMap, sync::Arc};
 
-use tokio::sync::RwLock;
+use std::sync::RwLock;
 
 use thiserror::Error;
 
@@ -26,7 +26,7 @@ where
 }
 
 pub trait PropDyn<T: 'static + Send>: Send + 'static {
-    fn create(&self) -> Box<dyn Actor<UserMessageType = T>>;
+    fn create(&self) -> Box<dyn Actor<Message = T>>;
 }
 
 #[derive(Error, Debug)]
@@ -67,24 +67,21 @@ impl ActorSystem {
 
     /// Retrieves an actor running in this actor system. If actor does not exist, a None
     /// is returned instead.
-    pub async fn get_actor<A: Actor>(
-        &self,
-        path: &ActorPath,
-    ) -> Option<ActorRef<A::UserMessageType>> {
-        let actors = self.actors.read().await;
+    pub fn get_actor<A: Actor>(&self, path: &ActorPath) -> Option<ActorRef<A::Message>> {
+        let actors = self.actors.read().unwrap();
         actors
             .get(path)
-            .and_then(|any| any.downcast_ref::<ActorRef<A::UserMessageType>>().cloned())
+            .and_then(|any| any.downcast_ref::<ActorRef<A::Message>>().cloned())
     }
 
-    pub(crate) async fn create_actor_path<A: Actor, P: Prop<A> + Send + 'static>(
+    pub(crate) fn create_actor_path<A: Actor, P: Prop<A> + Send + 'static>(
         &self,
         path: ActorPath,
         actor: P,
-    ) -> Result<ActorRef<A::UserMessageType>, ActorError> {
+    ) -> Result<ActorRef<A::Message>, ActorError> {
         log::debug!("Creating actor '{}' on system '{}'...", &path, &self.name);
 
-        let mut actors = self.actors.write().await;
+        let mut actors = self.actors.write().unwrap();
         if actors.contains_key(&path) {
             return Err(ActorError::Exists(path));
         }
@@ -103,54 +100,54 @@ impl ActorSystem {
 
     /// Launches a new top level actor on this actor system at the '/user' actor path. If another actor with
     /// the same name already exists, an `Err(ActorError::Exists(ActorPath))` is returned instead.
-    pub async fn create_actor<A: Actor, P: Prop<A> + Send + 'static>(
+    pub fn create_actor<A: Actor, P: Prop<A> + Send + 'static>(
         &self,
         name: &str,
         actor: P,
-    ) -> Result<ActorRef<A::UserMessageType>, ActorError> {
+    ) -> Result<ActorRef<A::Message>, ActorError> {
         let path = ActorPath::from("/user") / name;
-        self.create_actor_path(path, actor).await
+        self.create_actor_path(path, actor)
     }
 
     /// Retrieve or create a new actor on this actor system if it does not exist yet.
-    pub async fn get_or_create_actor<A, F>(
+    pub fn get_or_create_actor<A, F>(
         &self,
         name: &str,
         actor_fn: F,
-    ) -> Result<ActorRef<A::UserMessageType>, ActorError>
+    ) -> Result<ActorRef<A::Message>, ActorError>
     where
         A: Actor,
         F: Prop<A> + Send + 'static,
     {
         let path = ActorPath::from("/user") / name;
-        self.get_or_create_actor_path(&path, actor_fn).await
+        self.get_or_create_actor_path(&path, actor_fn)
     }
 
-    pub(crate) async fn get_or_create_actor_path<A, F>(
+    pub(crate) fn get_or_create_actor_path<A, F>(
         &self,
         path: &ActorPath,
         actor_fn: F,
-    ) -> Result<ActorRef<A::UserMessageType>, ActorError>
+    ) -> Result<ActorRef<A::Message>, ActorError>
     where
         A: Actor,
         F: Prop<A> + Send + 'static,
     {
-        let actors = self.actors.read().await;
-        match self.get_actor::<A>(path).await {
+        let actors = self.actors.read();
+        match self.get_actor::<A>(path) {
             Some(actor) => Ok(actor),
             None => {
                 drop(actors);
-                self.create_actor_path(path.clone(), actor_fn).await
+                self.create_actor_path(path.clone(), actor_fn)
             }
         }
     }
 
     /// Stops the actor on this actor system. All its children will also be stopped.
-    pub async fn stop_actor(&self, path: &ActorPath) {
+    pub fn stop_actor(&self, path: &ActorPath) {
         log::debug!("Stopping actor '{}' on system '{}'...", &path, &self.name);
         let mut paths: Vec<ActorPath> = vec![path.clone()];
         {
-            let running_actors = self.actors.read().await;
+            let running_actors = self.actors.read().unwrap();
             for running in running_actors.keys() {
                 if running.is_descendant_of(path) {
                     paths.push(running.clone());
@@ -159,7 +156,7 @@ impl ActorSystem {
         }
         paths.sort_unstable();
         paths.reverse();
-        let mut actors = self.actors.write().await;
+        let mut actors = self.actors.write().unwrap();
         for path in &paths {
             actors.remove(path);
         }

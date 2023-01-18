@@ -104,22 +104,19 @@ pub(crate) enum InternalMessage {
     ChildTerminate(ActorPath),
 }
 
+#[allow(unused_variables)]
 pub trait Actor: Send + 'static {
-    type UserMessageType: 'static + Send;
+    type Message: 'static + Send;
 
-    fn on_enter(&self, _context: &mut ActorContext<Self::UserMessageType>) {}
+    fn on_enter(&self, context: &mut ActorContext<Self::Message>) {}
 
-    fn on_exit(&self, _context: &mut ActorContext<Self::UserMessageType>) {}
+    fn on_exit(&self, context: &mut ActorContext<Self::Message>) {}
 
-    fn on_message(
-        &self,
-        context: &mut ActorContext<Self::UserMessageType>,
-        message: Self::UserMessageType,
-    );
+    fn on_message(&self, context: &mut ActorContext<Self::Message>, message: Self::Message);
 
     fn on_system_message(
         &self,
-        _context: &mut ActorContext<Self::UserMessageType>,
+        _context: &mut ActorContext<Self::Message>,
         _message: SystemMessage,
     ) {
     }
@@ -130,8 +127,8 @@ struct PropWrap<A: Actor, P: Prop<A>> {
     phantom: PhantomData<A>,
 }
 
-impl<A: Actor, P: Prop<A>> PropDyn<A::UserMessageType> for PropWrap<A, P> {
-    fn create(&self) -> Box<dyn Actor<UserMessageType = A::UserMessageType>> {
+impl<A: Actor, P: Prop<A>> PropDyn<A::Message> for PropWrap<A, P> {
+    fn create(&self) -> Box<dyn Actor<Message = A::Message>> {
         Box::new(self.prop.create())
     }
 }
