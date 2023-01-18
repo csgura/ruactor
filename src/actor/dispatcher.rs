@@ -65,7 +65,7 @@ impl<T: 'static + Send> Dispatcher<T> {
     fn on_exit(&mut self, old_actor: Option<Box<dyn Actor<Message = T>>>, self_ref: ActorRef<T>) {
         let mut context = self.create_context(self_ref.clone());
 
-        if let Some(actor) = old_actor {
+        if let Some(mut actor) = old_actor {
             actor.on_exit(&mut context);
 
             self.drop_context(self_ref, context);
@@ -75,7 +75,7 @@ impl<T: 'static + Send> Dispatcher<T> {
     fn on_enter(&mut self, self_ref: ActorRef<T>) {
         let mut context = self.create_context(self_ref.clone());
 
-        if let Some(actor) = &self.actor {
+        if let Some(actor) = &mut self.actor {
             actor.on_enter(&mut context);
 
             self.drop_context(self_ref, context);
@@ -85,7 +85,7 @@ impl<T: 'static + Send> Dispatcher<T> {
     fn on_message(&mut self, self_ref: ActorRef<T>, message: Message<T>) {
         let mut context = self.create_context(self_ref.clone());
 
-        if let Some(actor) = &self.actor {
+        if let Some(actor) = &mut self.actor {
             match message {
                 Message::System(msg) => {
                     self.last_message_timestamp = Instant::now();

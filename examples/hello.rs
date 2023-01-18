@@ -16,11 +16,11 @@ struct Grandson {}
 impl Actor for Grandson {
     type Message = TestMessage;
 
-    fn on_message(&self, _context: &mut ActorContext<Self::Message>, _message: Self::Message) {
+    fn on_message(&mut self, _context: &mut ActorContext<Self::Message>, _message: Self::Message) {
         todo!()
     }
 
-    fn on_exit(&self, _context: &mut ActorContext<Self::Message>) {
+    fn on_exit(&mut self, _context: &mut ActorContext<Self::Message>) {
         println!("Grandson exit");
     }
 }
@@ -28,13 +28,17 @@ impl Actor for Grandson {
 impl Actor for Child {
     type Message = TestMessage;
 
-    fn on_enter(&self, context: &mut ActorContext<Self::Message>) {
+    fn on_enter(&mut self, context: &mut ActorContext<Self::Message>) {
         context.get_or_create_child("cc".into(), || Grandson {});
 
         context.set_receive_timeout(Duration::from_secs(1));
     }
 
-    fn on_system_message(&self, context: &mut ActorContext<Self::Message>, message: SystemMessage) {
+    fn on_system_message(
+        &mut self,
+        context: &mut ActorContext<Self::Message>,
+        message: SystemMessage,
+    ) {
         match message {
             SystemMessage::ReceiveTimeout => {
                 println!("{} receive tmout", context.self_ref());
@@ -43,7 +47,7 @@ impl Actor for Child {
         }
     }
 
-    fn on_message(&self, context: &mut ActorContext<Self::Message>, message: Self::Message) {
+    fn on_message(&mut self, context: &mut ActorContext<Self::Message>, message: Self::Message) {
         println!(
             "actor = {}, receive message at Child {:?} : {}",
             context.self_ref(),
@@ -59,7 +63,7 @@ impl Actor for Child {
 impl Actor for Hello {
     type Message = TestMessage;
 
-    fn on_message(&self, context: &mut ActorContext<Self::Message>, message: Self::Message) {
+    fn on_message(&mut self, context: &mut ActorContext<Self::Message>, message: Self::Message) {
         println!("receive message {:?}", message);
         match message {
             TestMessage::Hello(key) => {
@@ -72,7 +76,7 @@ impl Actor for Hello {
         }
     }
 
-    fn on_enter(&self, context: &mut ActorContext<Self::Message>) {
+    fn on_enter(&mut self, context: &mut ActorContext<Self::Message>) {
         println!("start timer");
 
         context.start_single_timer(

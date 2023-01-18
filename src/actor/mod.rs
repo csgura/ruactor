@@ -108,14 +108,14 @@ pub(crate) enum InternalMessage {
 pub trait Actor: Send + 'static {
     type Message: 'static + Send;
 
-    fn on_enter(&self, context: &mut ActorContext<Self::Message>) {}
+    fn on_enter(&mut self, context: &mut ActorContext<Self::Message>) {}
 
-    fn on_exit(&self, context: &mut ActorContext<Self::Message>) {}
+    fn on_exit(&mut self, context: &mut ActorContext<Self::Message>) {}
 
-    fn on_message(&self, context: &mut ActorContext<Self::Message>, message: Self::Message);
+    fn on_message(&mut self, context: &mut ActorContext<Self::Message>, message: Self::Message);
 
     fn on_system_message(
-        &self,
+        &mut self,
         _context: &mut ActorContext<Self::Message>,
         _message: SystemMessage,
     ) {
