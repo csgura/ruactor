@@ -11,24 +11,27 @@ pub use system::Prop;
 
 #[macro_export]
 macro_rules! ask {
-    ($enum_name:ident::$variant:ident( _, $($e:expr),* )  ) => {
+    ($actor_ref:expr, $enum_name:ident::$variant:ident( _, $($e:expr),* )  ) => {
         {
             let (reply_to, rx) = tokio::sync::oneshot::channel();
-            let _m = $enum_name::$variant( reply_to, $($e,)*);
+            let m = $enum_name::$variant( reply_to, $($e,)*);
+			$actor_ref.tell(m);
             rx.await
         }
     };
-    ($enum_name:ident::$variant:ident( $($e:expr),* , _ )  ) => {
+    ($actor_ref:expr, $enum_name:ident::$variant:ident( $($e:expr),* , _ )  ) => {
         {
             let (reply_to, rx) = tokio::sync::oneshot::channel();
-            let _m = $enum_name::$variant(  $($e,)*  reply_to,);
+            let m = $enum_name::$variant(  $($e,)*  reply_to,);
+			$actor_ref.tell(m);
             rx.await
         }
     };
-    ($enum_name:ident::$variant:ident( $($e1:expr),* , _ , $($e2:expr),*)  ) => {
+    ($actor_ref:expr, $enum_name:ident::$variant:ident( $($e1:expr),* , _ , $($e2:expr),*)  ) => {
         {
             let (reply_to, rx) = tokio::sync::oneshot::channel();
-            let _m = $enum_name::$variant(  $($e1,)*  reply_to, $($e2,)*);
+            let m = $enum_name::$variant(  $($e1,)*  reply_to, $($e2,)*);
+			$actor_ref.tell(m);
             rx.await
         }
     };
