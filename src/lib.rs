@@ -8,6 +8,8 @@ pub use actor::ActorRef;
 pub use actor::SystemMessage;
 pub use system::ActorSystem;
 pub use system::Prop;
+pub use system::PropClone;
+pub use system::PropFunc;
 
 #[macro_export]
 macro_rules! ask {

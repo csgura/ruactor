@@ -7,10 +7,12 @@ struct Hello {
     _counter: u32,
 }
 
+#[derive(Clone)]
 struct Child {
     counter: u32,
 }
 
+#[derive(Clone)]
 struct Grandson {}
 
 impl Actor for Grandson {
@@ -29,7 +31,7 @@ impl Actor for Child {
     type Message = TestMessage;
 
     fn on_enter(&mut self, context: &mut ActorContext<Self::Message>) {
-        context.get_or_create_child("cc".into(), || Grandson {});
+        context.get_or_create_child("cc".into(), PropClone(Grandson {}));
 
         context.set_receive_timeout(Duration::from_secs(1));
     }
@@ -67,7 +69,8 @@ impl Actor for Hello {
         println!("receive message {:?}", message);
         match message {
             TestMessage::Hello(key) => {
-                let child = context.get_or_create_child(key.clone(), || Child { counter: 0 });
+                let child =
+                    context.get_or_create_child(key.clone(), PropClone(Child { counter: 0 }));
                 child.tell(TestMessage::Hello(key));
             }
             TestMessage::Timer(tmr) => {
@@ -97,7 +100,7 @@ async fn main() {
     let system = ActorSystem::new("test");
 
     let actor_ref = system
-        .create_actor("test-actor", || Hello { _counter: 0 })
+        .create_actor("test-actor", PropClone(Hello { _counter: 0 }))
         .unwrap();
 
     tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;

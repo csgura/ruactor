@@ -15,13 +15,31 @@ pub trait Prop<A: Actor>: 'static + Send {
     fn create(&self) -> A;
 }
 
-impl<A, F> Prop<A> for F
+pub struct PropFunc<A, F>(pub F)
+where
+    A: Actor,
+    F: Fn() -> A + 'static + Send;
+
+impl<A, F> Prop<A> for PropFunc<A, F>
 where
     A: Actor,
     F: Fn() -> A + 'static + Send,
 {
     fn create(&self) -> A {
-        self()
+        self.0()
+    }
+}
+
+pub struct PropClone<A>(pub A)
+where
+    A: Actor + Clone;
+
+impl<A> Prop<A> for PropClone<A>
+where
+    A: Actor + Clone,
+{
+    fn create(&self) -> A {
+        self.0.clone()
     }
 }
 
