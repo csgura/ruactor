@@ -14,28 +14,28 @@ pub use system::PropFunc;
 
 #[macro_export]
 macro_rules! ask {
-    ($actor_ref:expr, $enum_name:ident::$variant:ident( _, $($e:expr),* )  ) => {
+    ($actor_ref:expr, $enum_name:ident::$variant:ident( _, $($e:expr),* ) , $tmout:expr ) => {
         {
             let (reply_to, rx) = tokio::sync::oneshot::channel();
             let m = $enum_name::$variant( reply_to, $($e,)*);
 			($actor_ref).tell(m);
-            rx.await
+            tokio::time::timeout($tmout, rx).await
         }
     };
-    ($actor_ref:expr, $enum_name:ident::$variant:ident( $($e:expr),* , _ )  ) => {
+    ($actor_ref:expr, $enum_name:ident::$variant:ident( $($e:expr),* , _ ) , $tmout:expr ) => {
         {
             let (reply_to, rx) = tokio::sync::oneshot::channel();
-            let m = $enum_name::$variant(  $($e,)*  reply_to,);
+            let m = $enum_name::$variant(  $($e,)*  reply_to);
 			($actor_ref).tell(m);
-            rx.await
+            tokio::time::timeout($tmout, rx).await
         }
     };
-    ($actor_ref:expr, $enum_name:ident::$variant:ident( $($e1:expr),* , _ , $($e2:expr),*)  ) => {
+    ($actor_ref:expr, $enum_name:ident::$variant:ident( $($e1:expr),* , _ , $($e2:expr),*) , $tmout:expr ) => {
         {
             let (reply_to, rx) = tokio::sync::oneshot::channel();
             let m = $enum_name::$variant(  $($e1,)*  reply_to, $($e2,)*);
 			($actor_ref).tell(m);
-            rx.await
+            tokio::time::timeout($tmout, rx).await
         }
     };
 }
