@@ -40,6 +40,8 @@ macro_rules! ask {
     };
 }
 
+pub type ReplyTo<T> = tokio::sync::oneshot::Sender<T>;
+
 #[macro_export]
 macro_rules! reply_to {
     ($e:expr, $e2:expr) => {
