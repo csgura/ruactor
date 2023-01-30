@@ -55,8 +55,8 @@ macro_rules! ask {
 			($actor_ref).tell(m);
             match tokio::time::timeout($tmout, rx).await {
                 Ok(Ok(v)) => Ok(v),
-                Ok(Err(err)) => Err(ActorError::from(err)),
-                Err(err) => Err(ActorError::from(err)),
+                Ok(Err(err)) => Err($crate::ActorError::from(err)),
+                Err(err) => Err($crate::ActorError::from(err)),
             }
         }
     };
@@ -67,8 +67,8 @@ macro_rules! ask {
 			($actor_ref).tell(m);
             match tokio::time::timeout($tmout, rx).await {
                 Ok(Ok(v)) => Ok(v),
-                Ok(Err(err)) => Err(ActorError::from(err)),
-                Err(err) => Err(ActorError::from(err)),
+                Ok(Err(err)) => Err($crate::ActorError::from(err)),
+                Err(err) => Err($crate::ActorError::from(err)),
             }
         }
     };
@@ -79,8 +79,8 @@ macro_rules! ask {
 			($actor_ref).tell(m);
             match tokio::time::timeout($tmout, rx).await {
                 Ok(Ok(v)) => Ok(v),
-                Ok(Err(err)) => Err(ActorError::from(err)),
-                Err(err) => Err(ActorError::from(err)),
+                Ok(Err(err)) => Err($crate::ActorError::from(err)),
+                Err(err) => Err($crate::ActorError::from(err)),
             }
         }
     };
