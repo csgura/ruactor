@@ -67,10 +67,7 @@ impl<T: 'static + Send> ActorContext<T> {
 
         ret
     }
-    pub fn start_single_timer(&mut self, name: String, d: Duration, t: T)
-    where
-        T: Clone,
-    {
+    pub fn start_single_timer(&mut self, name: String, d: Duration, t: T) {
         let gen = self.next_timer_gen();
 
         self.cell.timer.list.insert(

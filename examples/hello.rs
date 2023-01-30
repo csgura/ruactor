@@ -76,6 +76,7 @@ impl Actor for Hello {
             TestMessage::Timer(tmr) => {
                 println!("receive timer {}", tmr);
             }
+            _ => {}
         }
     }
 
@@ -89,10 +90,11 @@ impl Actor for Hello {
         );
     }
 }
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 enum TestMessage {
     Hello(String),
     Timer(String),
+    Request(ReplyTo<String>, String),
 }
 
 #[tokio::main]
@@ -116,6 +118,12 @@ async fn main() {
 
     let msg_a = TestMessage::Hello("hi".to_string());
     actor_ref.tell(msg_a);
+
+    // let ret = ask!(
+    //     actor_ref,
+    //     TestMessage::Request(_, "hello".into()),
+    //     Duration::from_secs(10)
+    // );
 
     tokio::time::sleep(tokio::time::Duration::from_secs(1000)).await;
 

@@ -4,6 +4,7 @@ use std::sync::RwLock;
 
 use thiserror::Error;
 
+use crate::ActorError;
 use crate::{
     actor::{Actor, ActorRef, Mailbox},
     path::ActorPath,
@@ -45,30 +46,6 @@ where
 
 pub trait PropDyn<T: 'static + Send>: Send + 'static {
     fn create(&self) -> Box<dyn Actor<Message = T>>;
-}
-
-#[derive(Error, Debug)]
-pub enum ActorError {
-    #[error("Actor exists")]
-    Exists(ActorPath),
-
-    #[error("Actor creation failed")]
-    CreateError(String),
-
-    #[error("Sending message failed")]
-    SendError(String),
-
-    #[error("Actor runtime error")]
-    RuntimeError(anyhow::Error),
-}
-
-impl ActorError {
-    pub fn new<E>(error: E) -> Self
-    where
-        E: std::error::Error + Send + Sync + 'static,
-    {
-        Self::RuntimeError(anyhow::Error::new(error))
-    }
 }
 
 #[derive(Clone)]
