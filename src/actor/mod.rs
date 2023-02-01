@@ -116,8 +116,8 @@ pub trait Actor: Send + 'static {
 
     fn on_system_message(
         &mut self,
-        _context: &mut ActorContext<Self::Message>,
-        _message: SystemMessage,
+        context: &mut ActorContext<Self::Message>,
+        message: SystemMessage,
     ) {
     }
 }
