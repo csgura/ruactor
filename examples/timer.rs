@@ -97,7 +97,7 @@ impl Actor for ConnectionFailed {
     fn on_enter(&mut self, context: &mut ruactor::ActorContext<Self::Message>) {
         println!("enter connection failed");
         context.start_single_timer(
-            "reconnect".into(),
+            "reconnect",
             Duration::from_secs(10),
             //self.actor.cfg.reconnect_interval,
             ChildMessage::PrepareConnection(self.actor.addr.clone(), 2),

@@ -69,7 +69,12 @@ impl<T: 'static + Send> ActorContext<T> {
 
         ret
     }
-    pub fn start_single_timer(&mut self, name: String, d: Duration, t: T) {
+    pub fn start_single_timer<S>(&mut self, name: S, d: Duration, t: T)
+    where
+        S: AsRef<str>,
+    {
+        let name = String::from(name.as_ref());
+
         let gen = self.next_timer_gen();
 
         self.cell.timer.list.insert(
@@ -89,7 +94,11 @@ impl<T: 'static + Send> ActorContext<T> {
         });
     }
 
-    pub fn cancel_timer(&mut self, name: String) {
+    pub fn cancel_timer<S>(&mut self, name: S)
+    where
+        S: AsRef<str>,
+    {
+        let name = String::from(name.as_ref());
         self.cell.timer.list.remove(&name);
     }
 

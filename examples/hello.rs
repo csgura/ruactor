@@ -84,7 +84,7 @@ impl Actor for Hello {
         println!("start timer");
 
         context.start_single_timer(
-            "alarm".into(),
+            "alarm",
             Duration::from_secs(1),
             TestMessage::Timer("timer".into()),
         );
