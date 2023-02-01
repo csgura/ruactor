@@ -18,6 +18,7 @@ pub struct Mailbox<T: 'static + Send> {
     pub(crate) num_msg: Arc<AtomicU32>,
     pub(crate) status: Arc<AtomicBool>,
     pub(crate) cell: Arc<Mutex<Dispatcher<T>>>,
+    pub(crate) handle: tokio::runtime::Handle,
 }
 
 impl<T: 'static + Send> Clone for Mailbox<T> {
@@ -27,6 +28,7 @@ impl<T: 'static + Send> Clone for Mailbox<T> {
             num_msg: self.num_msg.clone(),
             status: self.status.clone(),
             cell: self.cell.clone(),
+            handle: self.handle.clone(),
         }
     }
 }
@@ -57,6 +59,7 @@ impl<T: 'static + Send> Mailbox<T> {
             ch: ch.0,
             num_msg: Arc::new(0.into()),
             status: Arc::new(false.into()),
+            handle: tokio::runtime::Handle::current(),
         };
         mbox
     }
@@ -92,7 +95,7 @@ impl<T: 'static + Send> Mailbox<T> {
             //println!("schedule");
             let cl: Mailbox<T> = self.clone();
 
-            tokio::spawn(async move {
+            self.handle.spawn(async move {
                 cl.receive(self_ref.clone()).await
                 //cl.status.store(true, std::sync::atomic::Ordering::SeqCst);
                 //actor_loop( &mut cell ).await;
