@@ -170,11 +170,11 @@ impl<T: 'static + Send> Dispatcher<T> {
 
                 self.cell.childrens.clear();
 
-                false
+                true
             }
             _ => {
                 self.on_message(self_ref.clone(), msg);
-                true
+                false
             }
         }
     }
@@ -210,7 +210,7 @@ impl<T: 'static + Send> Dispatcher<T> {
                     break;
                 }
 
-                if num_msg.load(Ordering::SeqCst) == 0 {
+                if num_msg.load(Ordering::SeqCst) == 0 && self.cell.unstashed.len() == 0 {
                     break;
                 }
             } else {

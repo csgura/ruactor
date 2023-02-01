@@ -83,6 +83,7 @@ impl Actor for ConnectionFailed {
     ) {
         match message {
             ChildMessage::SendRequest(sender, _, _, _, _) => {
+                println!("send error response!!");
                 let _ = sender.send(Err(ActorError::SendError("send error".into())));
             }
             ChildMessage::PrepareConnection(_, _) => {
@@ -97,7 +98,8 @@ impl Actor for ConnectionFailed {
         println!("enter connection failed");
         context.start_single_timer(
             "reconnect".into(),
-            self.actor.cfg.reconnect_interval,
+            Duration::from_secs(10),
+            //self.actor.cfg.reconnect_interval,
             ChildMessage::PrepareConnection(self.actor.addr.clone(), 2),
         );
     }
