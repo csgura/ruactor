@@ -48,40 +48,45 @@ impl ActorError {
 
 #[macro_export]
 macro_rules! ask {
-    ($actor_ref:expr, $enum_name:ident::$variant:ident( _, $($e:expr),* ) , $tmout:expr ) => {
+    (@tell: $actor_ref:expr, $m:expr, $rx:expr, $tmout:expr) => {
         {
-            let (reply_to, rx) = tokio::sync::oneshot::channel();
-            let m = $enum_name::$variant( reply_to, $($e,)*);
-			($actor_ref).tell(m);
-            match tokio::time::timeout($tmout, rx).await {
+            ($actor_ref).tell($m);
+            let recv = tokio::time::timeout($tmout, $rx);
+            match recv.await {
                 Ok(Ok(v)) => Ok(v),
                 Ok(Err(err)) => Err($crate::ActorError::from(err)),
                 Err(err) => Err($crate::ActorError::from(err)),
             }
+        }
+    };
+
+    ($actor_ref:expr, $enum_name:ident::$variant:ident( _, $($e:expr),* ) , $tmout:expr ) => {
+        {
+            let (reply_to, rx) = tokio::sync::oneshot::channel();
+            let m = $enum_name::$variant( reply_to, $($e,)*);
+			ask!(@tell: $actor_ref , m , rx, $tmout)
         }
     };
     ($actor_ref:expr, $enum_name:ident::$variant:ident( $($e:expr),* , _ ) , $tmout:expr ) => {
         {
             let (reply_to, rx) = tokio::sync::oneshot::channel();
             let m = $enum_name::$variant(  $($e,)*  reply_to);
-			($actor_ref).tell(m);
-            match tokio::time::timeout($tmout, rx).await {
-                Ok(Ok(v)) => Ok(v),
-                Ok(Err(err)) => Err($crate::ActorError::from(err)),
-                Err(err) => Err($crate::ActorError::from(err)),
-            }
+			ask!(@tell: $actor_ref , m , rx, $tmout)
         }
     };
     ($actor_ref:expr, $enum_name:ident::$variant:ident( $($e1:expr),* , _ , $($e2:expr),*) , $tmout:expr ) => {
         {
             let (reply_to, rx) = tokio::sync::oneshot::channel();
             let m = $enum_name::$variant(  $($e1,)*  reply_to, $($e2,)*);
-			($actor_ref).tell(m);
-            match tokio::time::timeout($tmout, rx).await {
-                Ok(Ok(v)) => Ok(v),
-                Ok(Err(err)) => Err($crate::ActorError::from(err)),
-                Err(err) => Err($crate::ActorError::from(err)),
-            }
+			ask!(@tell: $actor_ref , m , rx, $tmout)
+        }
+    };
+
+    ($actor_ref:expr, $enum_name:ident::$variant:ident{ $reply_id:ident : _ , $($tail:tt)* } , $tmout:expr ) => {
+        {
+            let (reply_to, rx) = tokio::sync::oneshot::channel();
+            let m = $enum_name::$variant{ $reply_id : reply_to, $($tail)*};
+            ask!(@tell: $actor_ref , m , rx, $tmout)
         }
     };
 }

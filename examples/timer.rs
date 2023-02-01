@@ -13,14 +13,17 @@ pub struct Config {
 type NumConn = i32;
 #[derive(Debug)]
 enum ClientMessage {
-    SendRequest(
-        ReplyTo<Result<Response, ActorError>>,
-        String,
-        Addr,
-        Header,
-        Vec<u8>,
-    ),
-    PrepareConnection(Addr, NumConn),
+    SendRequest {
+        sender: ReplyTo<Result<Response, ActorError>>,
+        method: String,
+        addr: Addr,
+        header: Header,
+        body: Vec<u8>,
+    },
+    PrepareConnection {
+        addr: Addr,
+        num_conn: NumConn,
+    },
 }
 
 #[derive(Debug)]
@@ -225,7 +228,13 @@ impl Actor for MainActor {
         message: Self::Message,
     ) {
         match message {
-            ClientMessage::SendRequest(sender, method, addr, header, body) => {
+            ClientMessage::SendRequest {
+                sender,
+                method,
+                addr,
+                header,
+                body,
+            } => {
                 let child = context.get_or_create_child(
                     addr.clone(),
                     PropClone(ChildActor {
@@ -239,7 +248,7 @@ impl Actor for MainActor {
                 ));
             }
 
-            ClientMessage::PrepareConnection(addr, num_conn) => {
+            ClientMessage::PrepareConnection { addr, num_conn } => {
                 let child = context.get_or_create_child(
                     addr.clone(),
                     PropClone(ChildActor {
@@ -281,7 +290,13 @@ impl Client {
     ) -> Result<Response, ActorError> {
         let res = ask!(
             self.actor_ref,
-            ClientMessage::SendRequest(_, method, addr, header, body),
+            ClientMessage::SendRequest {
+                sender: _,
+                method,
+                addr,
+                header,
+                body
+            },
             Duration::from_secs(10)
         )??;
         Ok(res)
@@ -292,6 +307,15 @@ impl Client {
 async fn main() {
     let asys = ActorSystem::new("hello");
     let cli = Client::new(asys);
+
+    let addr = String::from("hello");
+    let num_conn = 23;
+
+    let pc = ClientMessage::PrepareConnection {
+        addr: addr,
+        num_conn,
+    };
+
     cli.send_request(
         "POST".into(),
         "localhost".into(),

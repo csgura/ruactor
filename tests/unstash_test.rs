@@ -80,6 +80,9 @@ async fn unstash_test() -> Result<(), ActorError> {
 
     println!("hello??");
     let tmout = Duration::from_secs(10);
+
+    //    let res = ask!(target: actor_ref, MyMessage::Hello(reply_to, 1), rx, tmout)?;
+
     let res = ask!(actor_ref, MyMessage::Hello(_, 1), tmout)?;
     let res = ask!(actor_ref, MyMessage::Hello(_, 2), tmout)?;
     actor_ref.tell(MyMessage::Other);
