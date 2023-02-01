@@ -145,6 +145,39 @@ impl<T: 'static + Send> Dispatcher<T> {
         self.drop_context(self_ref, context);
     }
 
+    fn process_message(&mut self, self_ref: ActorRef<T>, msg: Message<T>) -> bool {
+        match msg {
+            Message::Terminate => {
+                //println!("stop actor {}", self_ref);
+
+                let da = None;
+                let old_actor = replace(&mut self.actor, da);
+
+                self.on_exit(old_actor, self_ref.clone());
+
+                self.ch.close();
+
+                if self.cell.parent.is_some() {
+                    self.cell.parent.as_ref().unwrap().send_internal_message(
+                        InternalMessage::ChildTerminate(self_ref.path.clone()),
+                    )
+                }
+
+                self.cell.childrens.iter().for_each(|x| {
+                    let child_ref = x.1.stop_ref.as_ref();
+                    child_ref.stop();
+                });
+
+                self.cell.childrens.clear();
+
+                false
+            }
+            _ => {
+                self.on_message(self_ref.clone(), msg);
+                true
+            }
+        }
+    }
     pub async fn actor_loop(&mut self, self_ref: ActorRef<T>) {
         if self.actor.is_none() {
             self.actor = Some(self.prop.create());
@@ -158,45 +191,29 @@ impl<T: 'static + Send> Dispatcher<T> {
         // let mut ch = cell.ch;
 
         // let mut stash = cell.stash;
-        if num_msg.load(Ordering::SeqCst) == 0 {
+        if num_msg.load(Ordering::SeqCst) == 0 && self.cell.unstashed.len() == 0 {
             return;
         }
 
-        while let Some(msg) = self.ch.recv().await {
-            num_msg.fetch_sub(1, Ordering::SeqCst);
-
-            match msg {
-                Message::Terminate => {
-                    //println!("stop actor {}", self_ref);
-
-                    let da = None;
-                    let old_actor = replace(&mut self.actor, da);
-
-                    self.on_exit(old_actor, self_ref.clone());
-
-                    self.ch.close();
-
-                    if self.cell.parent.is_some() {
-                        self.cell.parent.as_ref().unwrap().send_internal_message(
-                            InternalMessage::ChildTerminate(self_ref.path.clone()),
-                        )
-                    }
-
-                    self.cell.childrens.iter().for_each(|x| {
-                        let child_ref = x.1.stop_ref.as_ref();
-                        child_ref.stop();
-                    });
-
-                    self.cell.childrens.clear();
-
-                    break;
-                }
-                _ => {
-                    self.on_message(self_ref.clone(), msg);
+        loop {
+            if self.cell.unstashed.len() > 0 {
+                while let Some(msg) = self.cell.unstashed.pop() {
+                    self.process_message(self_ref.clone(), Message::User(msg));
                 }
             }
 
-            if num_msg.load(Ordering::SeqCst) == 0 {
+            if let Some(msg) = self.ch.recv().await {
+                num_msg.fetch_sub(1, Ordering::SeqCst);
+
+                let stop_flag = self.process_message(self_ref.clone(), msg);
+                if stop_flag {
+                    break;
+                }
+
+                if num_msg.load(Ordering::SeqCst) == 0 {
+                    break;
+                }
+            } else {
                 break;
             }
         }

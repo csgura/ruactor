@@ -20,6 +20,7 @@ pub struct ActorContext<T: 'static + Send> {
 pub struct ActorCell<T: 'static + Send> {
     pub(crate) parent: Option<Box<dyn ParentRef>>,
     pub(crate) stash: Vec<T>,
+    pub(crate) unstashed: Vec<T>,
     pub(crate) timer: Timer<T>,
     pub(crate) childrens: HashMap<String, ChildContainer>,
     pub(crate) receive_timeout: Option<Duration>,
@@ -31,6 +32,7 @@ impl<T: 'static + Send> Default for ActorCell<T> {
         Self {
             parent: Default::default(),
             stash: Default::default(),
+            unstashed: Default::default(),
             timer: Default::default(),
             childrens: Default::default(),
             receive_timeout: Default::default(),
@@ -83,7 +85,7 @@ impl<T: 'static + Send> ActorContext<T> {
             let s = tokio::time::sleep(d);
             s.await;
 
-            self_ref.send(Message::Timer(name.clone(), 0, t));
+            self_ref.send(Message::Timer(name.clone(), gen, t));
         });
     }
 
@@ -94,6 +96,10 @@ impl<T: 'static + Send> ActorContext<T> {
     pub fn set_receive_timeout(&mut self, d: Duration) {
         self.cell.receive_timeout = Some(d);
         self.schedule_receive_timeout(d);
+    }
+
+    pub fn cancel_receive_timeout(&mut self) {
+        self.cell.receive_timeout = None;
     }
 
     pub(crate) fn schedule_receive_timeout(&mut self, d: Duration) {
@@ -115,7 +121,7 @@ impl<T: 'static + Send> ActorContext<T> {
 
     pub fn unstash_all(&mut self) {
         while let Some(msg) = self.cell.stash.pop() {
-            self.self_ref.tell(msg);
+            self.cell.unstashed.push(msg);
         }
     }
 
