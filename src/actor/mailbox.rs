@@ -17,7 +17,7 @@ pub struct Mailbox<T: 'static + Send> {
     pub(crate) ch: tokio::sync::mpsc::UnboundedSender<Message<T>>,
     pub(crate) num_msg: Arc<AtomicU32>,
     pub(crate) status: Arc<AtomicBool>,
-    pub(crate) cell: Arc<Mutex<Dispatcher<T>>>,
+    pub(crate) dispatcher: Arc<Mutex<Dispatcher<T>>>,
     pub(crate) handle: tokio::runtime::Handle,
 }
 
@@ -27,7 +27,7 @@ impl<T: 'static + Send> Clone for Mailbox<T> {
             ch: self.ch.clone(),
             num_msg: self.num_msg.clone(),
             status: self.status.clone(),
-            cell: self.cell.clone(),
+            dispatcher: self.dispatcher.clone(),
             handle: self.handle.clone(),
         }
     }
@@ -46,7 +46,7 @@ impl<T: 'static + Send> Mailbox<T> {
 
         let ch = tokio::sync::mpsc::unbounded_channel::<Message<T>>();
 
-        let cell = Dispatcher {
+        let dispatcher = Dispatcher {
             actor: None,
             ch: ch.1,
             prop: Box::new(pdyn),
@@ -55,7 +55,7 @@ impl<T: 'static + Send> Mailbox<T> {
         };
 
         let mbox = Mailbox {
-            cell: Arc::new(Mutex::new(cell)),
+            dispatcher: Arc::new(Mutex::new(dispatcher)),
             ch: ch.0,
             num_msg: Arc::new(0.into()),
             status: Arc::new(false.into()),
@@ -68,12 +68,12 @@ impl<T: 'static + Send> Mailbox<T> {
     pub(crate) async fn receive(&self, self_ref: ActorRef<T>) {
         let mut owned = false;
 
-        if let Ok(mut cell) = self.cell.try_lock() {
+        if let Ok(mut dispatcher) = self.dispatcher.try_lock() {
             //println!("start receive loop");
 
             owned = true;
             self.status.store(true, Ordering::SeqCst);
-            cell.actor_loop(self_ref.clone()).await;
+            dispatcher.actor_loop(self_ref.clone()).await;
             self.status.store(false, Ordering::SeqCst);
             //println!("end receive loop");
         } else {
