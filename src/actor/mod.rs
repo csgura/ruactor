@@ -91,7 +91,6 @@ pub enum SystemMessage {
 
 #[derive(Debug)]
 pub(crate) enum Message<T: 'static + Send> {
-    System(SystemMessage),
     User(T),
     Timer(String, u32, T),
     ReceiveTimeout(Instant),

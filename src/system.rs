@@ -2,8 +2,6 @@ use std::{any::Any, collections::HashMap, sync::Arc};
 
 use std::sync::RwLock;
 
-use thiserror::Error;
-
 use crate::ActorError;
 use crate::{
     actor::{Actor, ActorRef, Mailbox},

@@ -14,7 +14,6 @@ pub use system::PropFunc;
 use thiserror::Error;
 use tokio::sync::oneshot;
 use tokio::time::error::Elapsed;
-use tokio::time::Timeout;
 
 #[derive(Error, Debug)]
 pub enum ActorError {
@@ -95,11 +94,11 @@ pub type ReplyTo<T> = tokio::sync::oneshot::Sender<T>;
 
 #[macro_export]
 macro_rules! reply_to {
-    ($e:expr, $e2:expr) => {
+    ($e:expr, $e2:expr) => {{
         if let Some(ch) = std::mem::replace(&mut $e, None) {
             ch.send($e2)
         } else {
             Err($e2)
         }
-    };
+    }};
 }

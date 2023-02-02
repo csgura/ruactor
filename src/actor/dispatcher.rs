@@ -2,7 +2,6 @@ use std::collections::HashMap;
 
 use std::marker::PhantomData;
 use std::mem::replace;
-use std::sync::atomic::Ordering;
 use std::time::Instant;
 
 use super::context::ActorCell;
@@ -81,7 +80,7 @@ impl<T: 'static + Send> Dispatcher<T> {
         }
     }
 
-    fn on_internal_message(&mut self, self_ref: &ActorRef<T>, message: InternalMessage) {
+    fn on_internal_message(&mut self, _self_ref: &ActorRef<T>, message: InternalMessage) {
         match message {
             InternalMessage::ChildTerminate(msg) => {
                 //println!("child terminated : {}", msg);
@@ -98,10 +97,6 @@ impl<T: 'static + Send> Dispatcher<T> {
 
         if let Some(actor) = &mut self.actor {
             match message {
-                Message::System(msg) => {
-                    self.last_message_timestamp = Instant::now();
-                    actor.on_system_message(&mut context, msg)
-                }
                 Message::User(msg) => {
                     self.last_message_timestamp = Instant::now();
 
@@ -191,7 +186,7 @@ impl<T: 'static + Send> Dispatcher<T> {
     }
 
     fn num_total_message(&self, self_ref: &ActorRef<T>) -> usize {
-        self_ref.mbox.internal_queue.len()
+        self.num_internal_message(self_ref)
             + self_ref.mbox.message_queue.len()
             + self.cell.unstashed.len()
     }

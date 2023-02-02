@@ -14,7 +14,7 @@ enum MyMessage {
 
 struct WorkingState {
     sender: Option<ReplyTo<String>>,
-    seq: i32,
+    _seq: i32,
 }
 
 impl Actor for WorkingState {
@@ -28,7 +28,7 @@ impl Actor for WorkingState {
         println!("receive message at working state");
         match message {
             MyMessage::Done => {
-                reply_to!(self.sender, "hello".into());
+                let _ = reply_to!(self.sender, "hello".into());
                 context.transit(IdleState);
             }
             _ => context.stash(message),
@@ -62,13 +62,13 @@ impl Actor for IdleState {
         match message {
             MyMessage::Hello(sender, seq) => context.transit(WorkingState {
                 sender: Some(sender),
-                seq: seq,
+                _seq: seq,
             }),
             _ => {}
         }
     }
 
-    fn on_enter(&mut self, context: &mut ruactor::ActorContext<Self::Message>) {
+    fn on_enter(&mut self, _context: &mut ruactor::ActorContext<Self::Message>) {
         println!("become idle state");
     }
 }
@@ -83,10 +83,10 @@ async fn unstash_test() -> Result<(), ActorError> {
 
     //    let res = ask!(target: actor_ref, MyMessage::Hello(reply_to, 1), rx, tmout)?;
 
-    let res = ask!(actor_ref, MyMessage::Hello(_, 1), tmout)?;
-    let res = ask!(actor_ref, MyMessage::Hello(_, 2), tmout)?;
+    let _ = ask!(actor_ref, MyMessage::Hello(_, 1), tmout)?;
+    let _ = ask!(actor_ref, MyMessage::Hello(_, 2), tmout)?;
     actor_ref.tell(MyMessage::Other);
-    let res = ask!(actor_ref, MyMessage::Hello(_, 3), tmout)?;
+    let _ = ask!(actor_ref, MyMessage::Hello(_, 3), tmout)?;
 
     Ok(())
 }

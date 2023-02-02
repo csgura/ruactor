@@ -1,7 +1,7 @@
 use std::{
     marker::PhantomData,
     sync::{
-        atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering},
+        atomic::{AtomicBool, Ordering},
         Arc,
     },
     time::Instant,

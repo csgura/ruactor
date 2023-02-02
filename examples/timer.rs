@@ -36,7 +36,7 @@ enum ChildMessage {
         Vec<u8>,
     ),
     PrepareConnection(Addr, NumConn),
-    ConnectionDone(String),
+    _ConnectionDone(String),
     ConnectionError(ActorError),
 }
 
@@ -59,18 +59,18 @@ struct MainActor {
 
 #[derive(Clone)]
 struct ChildActor {
-    cfg: Config,
+    _cfg: Config,
     addr: Addr,
 }
 
 struct Connected {
     actor: ChildActor,
-    conn: String,
+    _conn: String,
 }
 
 struct ConnectionFailed {
     actor: ChildActor,
-    err: ActorError,
+    _err: ActorError,
 }
 
 impl Actor for ConnectionFailed {
@@ -89,7 +89,7 @@ impl Actor for ConnectionFailed {
             ChildMessage::PrepareConnection(_, _) => {
                 context.transit(self.actor.clone());
             }
-            ChildMessage::ConnectionDone(_) => todo!(),
+            ChildMessage::_ConnectionDone(_) => todo!(),
             ChildMessage::ConnectionError(_) => todo!(),
         }
     }
@@ -104,7 +104,7 @@ impl Actor for ConnectionFailed {
         );
     }
 
-    fn on_exit(&mut self, context: &mut ruactor::ActorContext<Self::Message>) {}
+    fn on_exit(&mut self, _context: &mut ruactor::ActorContext<Self::Message>) {}
 
     fn on_system_message(
         &mut self,
@@ -121,9 +121,9 @@ async fn send_request(
     tokio::time::sleep(Duration::from_millis(10)).await;
     if true {
         let _ = sender.send(Ok(Response {
-            status: 200,
-            header: Default::default(),
-            body: Vec::new(),
+            _status: 200,
+            _header: Default::default(),
+            _body: Vec::new(),
         }));
     } else {
         let _ = sender.send(Err(ActorError::SendError("disconnected".into())));
@@ -148,21 +148,21 @@ impl Actor for Connected {
                 tokio::spawn(async move { send_request(sender, self_ref).await });
             }
             ChildMessage::PrepareConnection(_, _) => todo!(),
-            ChildMessage::ConnectionDone(conn) => {}
+            ChildMessage::_ConnectionDone(_) => {}
             ChildMessage::ConnectionError(reason) => {
                 context.transit(ConnectionFailed {
                     actor: self.actor.clone(),
-                    err: reason,
+                    _err: reason,
                 });
             }
         }
     }
 
-    fn on_enter(&mut self, context: &mut ruactor::ActorContext<Self::Message>) {
+    fn on_enter(&mut self, _context: &mut ruactor::ActorContext<Self::Message>) {
         println!("become Connected");
     }
 
-    fn on_exit(&mut self, context: &mut ruactor::ActorContext<Self::Message>) {}
+    fn on_exit(&mut self, _context: &mut ruactor::ActorContext<Self::Message>) {}
 
     fn on_system_message(
         &mut self,
@@ -181,14 +181,14 @@ impl Actor for ChildActor {
     ) {
         match message {
             ChildMessage::PrepareConnection(_, _) => todo!(),
-            ChildMessage::ConnectionDone(conn) => context.transit(Connected {
+            ChildMessage::_ConnectionDone(conn) => context.transit(Connected {
                 actor: self.clone(),
-                conn: conn,
+                _conn: conn,
             }),
             ChildMessage::ConnectionError(err) => {
                 context.transit(ConnectionFailed {
                     actor: self.clone(),
-                    err: err,
+                    _err: err,
                 });
             }
             _ => {
@@ -240,7 +240,7 @@ impl Actor for MainActor {
                 let child = context.get_or_create_child(
                     addr.clone(),
                     PropClone(ChildActor {
-                        cfg: self.cfg.clone(),
+                        _cfg: self.cfg.clone(),
                         addr: addr.clone(),
                     }),
                 );
@@ -254,7 +254,7 @@ impl Actor for MainActor {
                 let child = context.get_or_create_child(
                     addr.clone(),
                     PropClone(ChildActor {
-                        cfg: self.cfg.clone(),
+                        _cfg: self.cfg.clone(),
                         addr: addr.clone(),
                     }),
                 );
@@ -267,9 +267,9 @@ impl Actor for MainActor {
 
 #[derive(Debug)]
 pub struct Response {
-    status: i16,
-    header: Header,
-    body: Vec<u8>,
+    _status: i16,
+    _header: Header,
+    _body: Vec<u8>,
 }
 
 type Header = HashMap<String, Vec<String>>;
@@ -313,18 +313,19 @@ async fn main() {
     let addr = String::from("hello");
     let num_conn = 23;
 
-    let pc = ClientMessage::PrepareConnection {
+    let _pc = ClientMessage::PrepareConnection {
         addr: addr,
         num_conn,
     };
 
-    cli.send_request(
-        "POST".into(),
-        "localhost".into(),
-        Default::default(),
-        Default::default(),
-    )
-    .await;
+    let _ = cli
+        .send_request(
+            "POST".into(),
+            "localhost".into(),
+            Default::default(),
+            Default::default(),
+        )
+        .await;
     loop {
         tokio::time::sleep(Duration::from_secs(1)).await;
     }

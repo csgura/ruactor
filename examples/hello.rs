@@ -94,7 +94,7 @@ impl Actor for Hello {
 enum TestMessage {
     Hello(String),
     Timer(String),
-    Request(ReplyTo<String>, String),
+    _Request(ReplyTo<String>, String),
 }
 
 #[tokio::main]
