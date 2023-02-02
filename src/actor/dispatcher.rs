@@ -39,30 +39,30 @@ pub struct Dispatcher<T: 'static + Send> {
 }
 
 impl<T: 'static + Send> Dispatcher<T> {
-    fn create_context(&mut self, self_ref: ActorRef<T>) -> ActorContext<T> {
+    fn create_context(&mut self, self_ref: &ActorRef<T>) -> ActorContext<T> {
         let dc = ActorCell::default();
 
         ActorContext {
-            self_ref: self_ref,
+            self_ref: self_ref.clone(),
             actor: None,
             cell: replace(&mut self.cell, dc),
         }
     }
 
-    fn drop_context(&mut self, self_ref: ActorRef<T>, context: ActorContext<T>) {
+    fn drop_context(&mut self, self_ref: &ActorRef<T>, context: ActorContext<T>) {
         self.cell = context.cell;
 
         if context.actor.is_some() {
             let old_actor = replace(&mut self.actor, context.actor);
 
-            self.on_exit(old_actor, self_ref.clone());
+            self.on_exit(old_actor, self_ref);
 
-            self.on_enter(self_ref.clone());
+            self.on_enter(self_ref);
         }
     }
 
-    fn on_exit(&mut self, old_actor: Option<Box<dyn Actor<Message = T>>>, self_ref: ActorRef<T>) {
-        let mut context = self.create_context(self_ref.clone());
+    fn on_exit(&mut self, old_actor: Option<Box<dyn Actor<Message = T>>>, self_ref: &ActorRef<T>) {
+        let mut context = self.create_context(self_ref);
 
         if let Some(mut actor) = old_actor {
             actor.on_exit(&mut context);
@@ -71,8 +71,8 @@ impl<T: 'static + Send> Dispatcher<T> {
         }
     }
 
-    fn on_enter(&mut self, self_ref: ActorRef<T>) {
-        let mut context = self.create_context(self_ref.clone());
+    fn on_enter(&mut self, self_ref: &ActorRef<T>) {
+        let mut context = self.create_context(self_ref);
 
         if let Some(actor) = &mut self.actor {
             actor.on_enter(&mut context);
@@ -93,8 +93,8 @@ impl<T: 'static + Send> Dispatcher<T> {
         }
     }
 
-    fn on_message(&mut self, self_ref: ActorRef<T>, message: Message<T>) {
-        let mut context = self.create_context(self_ref.clone());
+    fn on_message(&mut self, self_ref: &ActorRef<T>, message: Message<T>) {
+        let mut context = self.create_context(self_ref);
 
         if let Some(actor) = &mut self.actor {
             match message {
@@ -157,7 +157,7 @@ impl<T: 'static + Send> Dispatcher<T> {
                 let da = None;
                 let old_actor = replace(&mut self.actor, da);
 
-                self.on_exit(old_actor, self_ref.clone());
+                self.on_exit(old_actor, self_ref);
 
                 if self.cell.parent.is_some() {
                     self.cell.parent.as_ref().unwrap().send_internal_message(
@@ -176,7 +176,7 @@ impl<T: 'static + Send> Dispatcher<T> {
                 true
             }
             _ => {
-                self.on_message(self_ref.clone(), msg);
+                self.on_message(self_ref, msg);
                 false
             }
         }
@@ -204,7 +204,7 @@ impl<T: 'static + Send> Dispatcher<T> {
         if self.actor.is_none() {
             self.actor = Some(self.prop.create());
 
-            self.on_enter(self_ref.clone());
+            self.on_enter(&self_ref);
         }
 
         // let mut actor = cell.actor;
@@ -217,19 +217,19 @@ impl<T: 'static + Send> Dispatcher<T> {
 
         let mut count = 0;
         loop {
-            if count >= 100 {
-                count = 0;
-                tokio::task::yield_now().await;
-            }
-
             while let Some(msg) = self.pop_internal_message(&self_ref) {
-                count += 1;
                 self.on_internal_message(&self_ref, msg);
             }
 
             if self.cell.unstashed.len() > 0 {
                 while let Some(msg) = self.cell.unstashed.pop() {
                     count += 1;
+
+                    if count >= 100 {
+                        count = 0;
+                        tokio::task::yield_now().await;
+                    }
+
                     self.process_message(&self_ref, Message::User(msg));
                 }
             }
@@ -246,6 +246,11 @@ impl<T: 'static + Send> Dispatcher<T> {
                 }
             } else if self.num_total_message(&self_ref) == 0 {
                 break;
+            }
+
+            if count >= 100 {
+                count = 0;
+                tokio::task::yield_now().await;
             }
         }
     }

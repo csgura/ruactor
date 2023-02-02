@@ -25,15 +25,42 @@ pub struct Mailbox<T: 'static + Send> {
     pub(crate) handle: tokio::runtime::Handle,
 }
 
-impl<T: 'static + Send> Clone for Mailbox<T> {
-    fn clone(&self) -> Self {
-        Self {
-            internal_queue: SegQueue::new(),
-            message_queue: SegQueue::new(),
-            running: self.running.clone(),
-            terminated: self.terminated.clone(),
-            dispatcher: self.dispatcher.clone(),
-            handle: self.handle.clone(),
+// impl<T: 'static + Send> Clone for Mailbox<T> {
+//     fn clone(&self) -> Self {
+//         Self {
+//             internal_queue: SegQueue::new(),
+//             message_queue: SegQueue::new(),
+//             running: self.running.clone(),
+//             terminated: self.terminated.clone(),
+//             dispatcher: self.dispatcher.clone(),
+//             handle: self.handle.clone(),
+//         }
+//     }
+// }
+
+pub(crate) async fn receive<T: 'static + Send>(self_ref: ActorRef<T>) {
+    let mbox = self_ref.mbox.as_ref();
+
+    let mut owned = false;
+
+    if let Ok(mut dispatcher) = mbox.dispatcher.try_lock() {
+        //println!("start receive loop");
+
+        owned = true;
+        mbox.running.store(true, Ordering::SeqCst);
+        dispatcher.actor_loop(self_ref.clone()).await;
+        mbox.running.store(false, Ordering::SeqCst);
+        //println!("end receive loop");
+    } else {
+        //println!("lock failed");
+    }
+
+    if owned {
+        let num_msg = mbox.num_total_message();
+        if num_msg > 0 {
+            //println!("num msg = {}", num_msg);
+            //mbox.receive().await;
+            mbox.schedule(self_ref.clone());
         }
     }
 }
@@ -68,30 +95,6 @@ impl<T: 'static + Send> Mailbox<T> {
     }
 
     //#[async_recursion::async_recursion]
-    pub(crate) async fn receive(&self, self_ref: ActorRef<T>) {
-        let mut owned = false;
-
-        if let Ok(mut dispatcher) = self.dispatcher.try_lock() {
-            //println!("start receive loop");
-
-            owned = true;
-            self.running.store(true, Ordering::SeqCst);
-            dispatcher.actor_loop(self_ref.clone()).await;
-            self.running.store(false, Ordering::SeqCst);
-            //println!("end receive loop");
-        } else {
-            //println!("lock failed");
-        }
-
-        if owned {
-            let num_msg = self.num_total_message();
-            if num_msg > 0 {
-                //println!("num msg = {}", num_msg);
-                //self.receive().await;
-                self.schedule(self_ref.clone());
-            }
-        }
-    }
 
     pub(crate) fn num_total_message(&self) -> usize {
         self.internal_queue.len() + self.message_queue.len()
@@ -104,10 +107,10 @@ impl<T: 'static + Send> Mailbox<T> {
     pub(crate) fn schedule(&self, self_ref: ActorRef<T>) {
         if !self.running.load(Ordering::SeqCst) {
             //println!("schedule");
-            let cl: Mailbox<T> = self.clone();
+            //let cl: Mailbox<T> = self.clone();
 
             self.handle.spawn(async move {
-                cl.receive(self_ref.clone()).await
+                receive(self_ref.clone()).await
                 //cl.status.store(true, std::sync::atomic::Ordering::SeqCst);
                 //actor_loop( &mut cell ).await;
             });
