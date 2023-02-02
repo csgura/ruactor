@@ -36,7 +36,7 @@ pub(crate) trait ParentRef: 'static + Send {
 
 impl<T: 'static + Send> ParentRef for ActorRef<T> {
     fn send_internal_message(&self, message: InternalMessage) {
-        self.send(Message::Internal(message))
+        self.mbox.send_internal(self.clone(), message)
     }
 }
 
@@ -96,7 +96,6 @@ pub(crate) enum Message<T: 'static + Send> {
     Timer(String, u32, T),
     ReceiveTimeout(Instant),
     Terminate,
-    Internal(InternalMessage),
 }
 
 #[derive(Debug)]

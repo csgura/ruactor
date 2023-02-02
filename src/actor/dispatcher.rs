@@ -82,6 +82,18 @@ impl<T: 'static + Send> Dispatcher<T> {
         }
     }
 
+    fn on_internal_message(&mut self, self_ref: &ActorRef<T>, message: InternalMessage) {
+        match message {
+            InternalMessage::ChildTerminate(msg) => {
+                //println!("child terminated : {}", msg);
+                let key = msg.key();
+
+                self.cell.childrens.remove(&key);
+                // println!("after children size =  {}", context.childrens.len());
+            }
+        }
+    }
+
     fn on_message(&mut self, self_ref: ActorRef<T>, message: Message<T>) {
         let mut context = self.create_context(self_ref.clone());
 
@@ -130,13 +142,6 @@ impl<T: 'static + Send> Dispatcher<T> {
                     }
                 }
 
-                Message::Internal(super::InternalMessage::ChildTerminate(msg)) => {
-                    //println!("child terminated : {}", msg);
-                    let key = msg.key();
-
-                    context.cell.childrens.remove(&key);
-                    // println!("after children size =  {}", context.childrens.len());
-                }
                 Message::Terminate => {
                     // covered by actor loop
                 }
@@ -145,7 +150,7 @@ impl<T: 'static + Send> Dispatcher<T> {
         self.drop_context(self_ref, context);
     }
 
-    fn process_message(&mut self, self_ref: ActorRef<T>, msg: Message<T>) -> bool {
+    fn process_message(&mut self, self_ref: &ActorRef<T>, msg: Message<T>) -> bool {
         match msg {
             Message::Terminate => {
                 //println!("stop actor {}", self_ref);
@@ -178,6 +183,25 @@ impl<T: 'static + Send> Dispatcher<T> {
             }
         }
     }
+
+    fn num_internal_message(&self, self_ref: &ActorRef<T>) -> usize {
+        self_ref.mbox.internal_queue.len()
+    }
+
+    fn num_user_message(&self, self_ref: &ActorRef<T>) -> usize {
+        self_ref.mbox.num_msg.load(Ordering::SeqCst)
+    }
+
+    fn num_total_message(&self, self_ref: &ActorRef<T>) -> usize {
+        self_ref.mbox.internal_queue.len()
+            + self_ref.mbox.num_msg.load(Ordering::SeqCst)
+            + self.cell.unstashed.len()
+    }
+
+    fn pop_internal_message(&self, self_ref: &ActorRef<T>) -> Option<InternalMessage> {
+        self_ref.mbox.internal_queue.pop()
+    }
+
     pub async fn actor_loop(&mut self, self_ref: ActorRef<T>) {
         if self.actor.is_none() {
             self.actor = Some(self.prop.create());
@@ -191,29 +215,33 @@ impl<T: 'static + Send> Dispatcher<T> {
         // let mut ch = cell.ch;
 
         // let mut stash = cell.stash;
-        if num_msg.load(Ordering::SeqCst) == 0 && self.cell.unstashed.len() == 0 {
+        if self.num_total_message(&self_ref) == 0 {
             return;
         }
 
         loop {
+            while let Some(msg) = self.pop_internal_message(&self_ref) {
+                self.on_internal_message(&self_ref, msg);
+            }
+
             if self.cell.unstashed.len() > 0 {
                 while let Some(msg) = self.cell.unstashed.pop() {
-                    self.process_message(self_ref.clone(), Message::User(msg));
+                    self.process_message(&self_ref, Message::User(msg));
                 }
             }
 
-            if num_msg.load(Ordering::SeqCst) > 0 {
+            if self.num_user_message(&self_ref) > 0 {
                 if let Some(msg) = self.ch.recv().await {
                     num_msg.fetch_sub(1, Ordering::SeqCst);
 
-                    let stop_flag = self.process_message(self_ref.clone(), msg);
+                    let stop_flag = self.process_message(&self_ref, msg);
                     if stop_flag {
                         break;
                     }
                 } else {
                     break;
                 }
-            } else if self.cell.unstashed.len() == 0 {
+            } else if self.num_total_message(&self_ref) == 0 {
                 break;
             }
         }

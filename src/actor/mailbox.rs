@@ -1,21 +1,25 @@
 use std::{
     marker::PhantomData,
     sync::{
-        atomic::{AtomicBool, AtomicU32, Ordering},
+        atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering},
         Arc,
     },
     time::Instant,
 };
 
+use crossbeam::queue::SegQueue;
 use tokio::sync::Mutex;
 
 use crate::{Actor, Prop};
 
-use super::{context::ActorCell, ActorRef, Dispatcher, Message, ParentRef, PropWrap};
+use super::{
+    context::ActorCell, ActorRef, Dispatcher, InternalMessage, Message, ParentRef, PropWrap,
+};
 
 pub struct Mailbox<T: 'static + Send> {
+    pub(crate) internal_queue: SegQueue<InternalMessage>,
     pub(crate) ch: tokio::sync::mpsc::UnboundedSender<Message<T>>,
-    pub(crate) num_msg: Arc<AtomicU32>,
+    pub(crate) num_msg: Arc<AtomicUsize>,
     pub(crate) status: Arc<AtomicBool>,
     pub(crate) dispatcher: Arc<Mutex<Dispatcher<T>>>,
     pub(crate) handle: tokio::runtime::Handle,
@@ -24,6 +28,7 @@ pub struct Mailbox<T: 'static + Send> {
 impl<T: 'static + Send> Clone for Mailbox<T> {
     fn clone(&self) -> Self {
         Self {
+            internal_queue: SegQueue::new(),
             ch: self.ch.clone(),
             num_msg: self.num_msg.clone(),
             status: self.status.clone(),
@@ -55,6 +60,7 @@ impl<T: 'static + Send> Mailbox<T> {
         };
 
         let mbox = Mailbox {
+            internal_queue: SegQueue::new(),
             dispatcher: Arc::new(Mutex::new(dispatcher)),
             ch: ch.0,
             num_msg: Arc::new(0.into()),
@@ -81,13 +87,17 @@ impl<T: 'static + Send> Mailbox<T> {
         }
 
         if owned {
-            let num_msg = self.num_msg.load(Ordering::SeqCst);
+            let num_msg = self.num_total_message();
             if num_msg > 0 {
                 //println!("num msg = {}", num_msg);
                 //self.receive().await;
                 self.schedule(self_ref.clone());
             }
         }
+    }
+
+    fn num_total_message(&self) -> usize {
+        self.internal_queue.len() + self.num_msg.load(Ordering::SeqCst)
     }
 
     pub(crate) fn schedule(&self, self_ref: ActorRef<T>) {
@@ -116,5 +126,10 @@ impl<T: 'static + Send> Mailbox<T> {
                 log::warn!("dead letter message to {} ", self_ref);
             }
         }
+    }
+
+    pub(crate) fn send_internal(&self, self_ref: ActorRef<T>, msg: InternalMessage) {
+        self.internal_queue.push(msg);
+        self.schedule(self_ref);
     }
 }
