@@ -34,7 +34,6 @@ impl<T: 'static> Default for Timer<T> {
 pub struct Dispatcher<T: 'static + Send> {
     pub(crate) actor: Option<Box<dyn Actor<Message = T>>>,
     pub(crate) prop: Box<dyn PropDyn<T>>,
-    pub(crate) ch: tokio::sync::mpsc::UnboundedReceiver<Message<T>>,
     pub(crate) last_message_timestamp: Instant,
     pub(crate) cell: ActorCell<T>,
 }
@@ -117,10 +116,10 @@ impl<T: 'static + Send> Dispatcher<T> {
                     };
                 }
                 Message::ReceiveTimeout(exp) => {
-                    let num_msg = self_ref.mbox.num_msg.clone();
+                    let num_msg = self_ref.mbox.num_user_message();
 
                     if let Some(tmout) = context.cell.receive_timeout {
-                        if num_msg.load(Ordering::SeqCst) == 0 {
+                        if num_msg == 0 {
                             if exp > self.last_message_timestamp {
                                 if exp - self.last_message_timestamp >= tmout {
                                     actor.on_system_message(
@@ -160,8 +159,6 @@ impl<T: 'static + Send> Dispatcher<T> {
 
                 self.on_exit(old_actor, self_ref.clone());
 
-                self.ch.close();
-
                 if self.cell.parent.is_some() {
                     self.cell.parent.as_ref().unwrap().send_internal_message(
                         InternalMessage::ChildTerminate(self_ref.path.clone()),
@@ -175,6 +172,7 @@ impl<T: 'static + Send> Dispatcher<T> {
 
                 self.cell.childrens.clear();
 
+                self_ref.mbox.close();
                 true
             }
             _ => {
@@ -189,12 +187,12 @@ impl<T: 'static + Send> Dispatcher<T> {
     }
 
     fn num_user_message(&self, self_ref: &ActorRef<T>) -> usize {
-        self_ref.mbox.num_msg.load(Ordering::SeqCst)
+        self_ref.mbox.message_queue.len()
     }
 
     fn num_total_message(&self, self_ref: &ActorRef<T>) -> usize {
         self_ref.mbox.internal_queue.len()
-            + self_ref.mbox.num_msg.load(Ordering::SeqCst)
+            + self_ref.mbox.message_queue.len()
             + self.cell.unstashed.len()
     }
 
@@ -209,8 +207,6 @@ impl<T: 'static + Send> Dispatcher<T> {
             self.on_enter(self_ref.clone());
         }
 
-        let num_msg = self_ref.mbox.num_msg.clone();
-
         // let mut actor = cell.actor;
         // let mut ch = cell.ch;
 
@@ -219,21 +215,28 @@ impl<T: 'static + Send> Dispatcher<T> {
             return;
         }
 
+        let mut count = 0;
         loop {
+            if count >= 100 {
+                count = 0;
+                tokio::task::yield_now().await;
+            }
+
             while let Some(msg) = self.pop_internal_message(&self_ref) {
+                count += 1;
                 self.on_internal_message(&self_ref, msg);
             }
 
             if self.cell.unstashed.len() > 0 {
                 while let Some(msg) = self.cell.unstashed.pop() {
+                    count += 1;
                     self.process_message(&self_ref, Message::User(msg));
                 }
             }
 
             if self.num_user_message(&self_ref) > 0 {
-                if let Some(msg) = self.ch.recv().await {
-                    num_msg.fetch_sub(1, Ordering::SeqCst);
-
+                if let Some(msg) = self_ref.mbox.message_queue.pop() {
+                    count += 1;
                     let stop_flag = self.process_message(&self_ref, msg);
                     if stop_flag {
                         break;

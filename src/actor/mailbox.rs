@@ -18,9 +18,9 @@ use super::{
 
 pub struct Mailbox<T: 'static + Send> {
     pub(crate) internal_queue: SegQueue<InternalMessage>,
-    pub(crate) ch: tokio::sync::mpsc::UnboundedSender<Message<T>>,
-    pub(crate) num_msg: Arc<AtomicUsize>,
-    pub(crate) status: Arc<AtomicBool>,
+    pub(crate) message_queue: SegQueue<Message<T>>,
+    pub(crate) running: Arc<AtomicBool>,
+    pub(crate) terminated: Arc<AtomicBool>,
     pub(crate) dispatcher: Arc<Mutex<Dispatcher<T>>>,
     pub(crate) handle: tokio::runtime::Handle,
 }
@@ -29,9 +29,9 @@ impl<T: 'static + Send> Clone for Mailbox<T> {
     fn clone(&self) -> Self {
         Self {
             internal_queue: SegQueue::new(),
-            ch: self.ch.clone(),
-            num_msg: self.num_msg.clone(),
-            status: self.status.clone(),
+            message_queue: SegQueue::new(),
+            running: self.running.clone(),
+            terminated: self.terminated.clone(),
             dispatcher: self.dispatcher.clone(),
             handle: self.handle.clone(),
         }
@@ -49,11 +49,8 @@ impl<T: 'static + Send> Mailbox<T> {
             phantom: PhantomData,
         };
 
-        let ch = tokio::sync::mpsc::unbounded_channel::<Message<T>>();
-
         let dispatcher = Dispatcher {
             actor: None,
-            ch: ch.1,
             prop: Box::new(pdyn),
             last_message_timestamp: Instant::now(),
             cell: ActorCell::new(parent),
@@ -62,9 +59,9 @@ impl<T: 'static + Send> Mailbox<T> {
         let mbox = Mailbox {
             internal_queue: SegQueue::new(),
             dispatcher: Arc::new(Mutex::new(dispatcher)),
-            ch: ch.0,
-            num_msg: Arc::new(0.into()),
-            status: Arc::new(false.into()),
+            message_queue: SegQueue::new(),
+            running: Arc::new(false.into()),
+            terminated: Arc::new(false.into()),
             handle: tokio::runtime::Handle::current(),
         };
         mbox
@@ -78,9 +75,9 @@ impl<T: 'static + Send> Mailbox<T> {
             //println!("start receive loop");
 
             owned = true;
-            self.status.store(true, Ordering::SeqCst);
+            self.running.store(true, Ordering::SeqCst);
             dispatcher.actor_loop(self_ref.clone()).await;
-            self.status.store(false, Ordering::SeqCst);
+            self.running.store(false, Ordering::SeqCst);
             //println!("end receive loop");
         } else {
             //println!("lock failed");
@@ -96,12 +93,16 @@ impl<T: 'static + Send> Mailbox<T> {
         }
     }
 
-    fn num_total_message(&self) -> usize {
-        self.internal_queue.len() + self.num_msg.load(Ordering::SeqCst)
+    pub(crate) fn num_total_message(&self) -> usize {
+        self.internal_queue.len() + self.message_queue.len()
+    }
+
+    pub(crate) fn num_user_message(&self) -> usize {
+        self.message_queue.len()
     }
 
     pub(crate) fn schedule(&self, self_ref: ActorRef<T>) {
-        if !self.status.load(Ordering::SeqCst) {
+        if !self.running.load(Ordering::SeqCst) {
             //println!("schedule");
             let cl: Mailbox<T> = self.clone();
 
@@ -115,16 +116,18 @@ impl<T: 'static + Send> Mailbox<T> {
         }
     }
 
+    pub(crate) fn is_terminated(&self) -> bool {
+        self.terminated.load(Ordering::SeqCst)
+    }
+
+    pub(crate) fn close(&self) {
+        self.terminated.store(true, Ordering::SeqCst);
+    }
+
     pub(crate) fn send(&self, self_ref: ActorRef<T>, msg: Message<T>) {
-        let ch = self.ch.clone();
-        match ch.send(msg) {
-            Ok(_) => {
-                self.num_msg.fetch_add(1, Ordering::SeqCst);
-                self.schedule(self_ref);
-            }
-            Err(_) => {
-                log::warn!("dead letter message to {} ", self_ref);
-            }
+        if !self.is_terminated() {
+            self.message_queue.push(msg);
+            self.schedule(self_ref);
         }
     }
 
