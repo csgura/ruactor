@@ -202,18 +202,18 @@ impl<T: 'static + Send> Dispatcher<T> {
                 }
             }
 
-            if let Some(msg) = self.ch.recv().await {
-                num_msg.fetch_sub(1, Ordering::SeqCst);
+            if num_msg.load(Ordering::SeqCst) > 0 {
+                if let Some(msg) = self.ch.recv().await {
+                    num_msg.fetch_sub(1, Ordering::SeqCst);
 
-                let stop_flag = self.process_message(self_ref.clone(), msg);
-                if stop_flag {
+                    let stop_flag = self.process_message(self_ref.clone(), msg);
+                    if stop_flag {
+                        break;
+                    }
+                } else {
                     break;
                 }
-
-                if num_msg.load(Ordering::SeqCst) == 0 && self.cell.unstashed.len() == 0 {
-                    break;
-                }
-            } else {
+            } else if self.cell.unstashed.len() == 0 {
                 break;
             }
         }
