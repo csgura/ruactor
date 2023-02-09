@@ -92,7 +92,7 @@ impl<T: 'static + Send> Dispatcher<T> {
         }
     }
 
-    fn on_message(&mut self, self_ref: &ActorRef<T>, message: Message<T>) {
+    async fn on_message(&mut self, self_ref: &ActorRef<T>, message: Message<T>) {
         let mut context = self.create_context(self_ref);
 
         if let Some(actor) = &mut self.actor {
@@ -100,15 +100,19 @@ impl<T: 'static + Send> Dispatcher<T> {
                 Message::User(msg) => {
                     self.last_message_timestamp = Instant::now();
 
-                    actor.on_message(&mut context, msg)
+                    actor.on_message_async(&mut context, msg).await;
                 }
                 Message::Timer(key, gen, msg) => {
                     self.last_message_timestamp = Instant::now();
 
-                    match context.cell.timer.list.get(&key) {
-                        Some(info) if info.gen == gen => actor.on_message(&mut context, msg),
-                        _ => {}
+                    let signal = match context.cell.timer.list.get(&key) {
+                        Some(info) if info.gen == gen => true,
+                        _ => false,
                     };
+
+                    if signal {
+                        actor.on_message_async(&mut context, msg).await;
+                    }
                 }
                 Message::ReceiveTimeout(exp) => {
                     let num_msg = self_ref.mbox.num_user_message();
@@ -144,7 +148,7 @@ impl<T: 'static + Send> Dispatcher<T> {
         self.drop_context(self_ref, context);
     }
 
-    fn process_message(&mut self, self_ref: &ActorRef<T>, msg: Message<T>) -> bool {
+    async fn process_message(&mut self, self_ref: &ActorRef<T>, msg: Message<T>) -> bool {
         match msg {
             Message::Terminate => {
                 //println!("stop actor {}", self_ref);
@@ -171,7 +175,7 @@ impl<T: 'static + Send> Dispatcher<T> {
                 true
             }
             _ => {
-                self.on_message(self_ref, msg);
+                self.on_message(self_ref, msg).await;
                 false
             }
         }
@@ -225,14 +229,14 @@ impl<T: 'static + Send> Dispatcher<T> {
                         tokio::task::yield_now().await;
                     }
 
-                    self.process_message(&self_ref, Message::User(msg));
+                    self.process_message(&self_ref, Message::User(msg)).await;
                 }
             }
 
             if self.num_user_message(&self_ref) > 0 {
                 if let Some(msg) = self_ref.mbox.message_queue.pop() {
                     count += 1;
-                    let stop_flag = self.process_message(&self_ref, msg);
+                    let stop_flag = self.process_message(&self_ref, msg).await;
                     if stop_flag {
                         break;
                     }
