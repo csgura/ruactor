@@ -46,6 +46,14 @@ impl<T: 'static + Send> Display for ActorRef<T> {
     }
 }
 
+impl<T: 'static + Send> Debug for ActorRef<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ActorRef")
+            .field("path", &self.path)
+            .finish()
+    }
+}
+
 pub use dispatcher::Dispatcher;
 pub use mailbox::Mailbox;
 
