@@ -13,6 +13,7 @@ log = "0.4"
 anyhow = "1.0"
 thiserror = "1.0"
 crossbeam = "0.8.2"
+futures = "0.3"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }

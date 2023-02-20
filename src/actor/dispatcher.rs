@@ -2,7 +2,10 @@ use std::collections::HashMap;
 
 use std::marker::PhantomData;
 use std::mem::replace;
+use std::panic::AssertUnwindSafe;
 use std::time::Instant;
+
+use futures::FutureExt;
 
 use super::context::ActorCell;
 use super::context::ActorContext;
@@ -175,7 +178,17 @@ impl<T: 'static + Send> Dispatcher<T> {
                 true
             }
             _ => {
-                self.on_message(self_ref, msg).await;
+                let res = AssertUnwindSafe(self.on_message(self_ref, msg))
+                    .catch_unwind()
+                    .await;
+                if let Err(err) = res {
+                    //println!("panic occurred {:?}", err);
+                    let old_actor = self.actor.take();
+                    self.on_exit(old_actor, self_ref);
+
+                    self.actor = Some(self.prop.create());
+                    self.on_enter(&self_ref);
+                }
                 false
             }
         }
