@@ -40,8 +40,11 @@ pub struct Dispatcher<T: 'static + Send> {
     pub(crate) cell: ActorCell<T>,
 }
 
+struct PanicError {}
+
 impl<T: 'static + Send> Dispatcher<T> {
     fn create_context(&mut self, self_ref: &ActorRef<T>) -> ActorContext<T> {
+        //println!("create context");
         let dc = ActorCell::default();
 
         ActorContext {
@@ -52,6 +55,7 @@ impl<T: 'static + Send> Dispatcher<T> {
     }
 
     fn drop_context(&mut self, self_ref: &ActorRef<T>, context: ActorContext<T>) {
+        //println!("drop context");
         self.cell = context.cell;
 
         if context.actor.is_some() {
@@ -95,15 +99,18 @@ impl<T: 'static + Send> Dispatcher<T> {
         }
     }
 
-    async fn on_message(&mut self, self_ref: &ActorRef<T>, message: Message<T>) {
-        let mut context = self.create_context(self_ref);
-
+    async fn on_message_in_context(
+        &mut self,
+        self_ref: &ActorRef<T>,
+        context: &mut ActorContext<T>,
+        message: Message<T>,
+    ) {
         if let Some(actor) = &mut self.actor {
             match message {
                 Message::User(msg) => {
                     self.last_message_timestamp = Instant::now();
 
-                    actor.on_message_async(&mut context, msg).await;
+                    actor.on_message_async(context, msg).await;
                 }
                 Message::Timer(key, gen, msg) => {
                     self.last_message_timestamp = Instant::now();
@@ -114,7 +121,7 @@ impl<T: 'static + Send> Dispatcher<T> {
                     };
 
                     if signal {
-                        actor.on_message_async(&mut context, msg).await;
+                        actor.on_message_async(context, msg).await;
                     }
                 }
                 Message::ReceiveTimeout(exp) => {
@@ -125,7 +132,7 @@ impl<T: 'static + Send> Dispatcher<T> {
                             if exp > self.last_message_timestamp {
                                 if exp - self.last_message_timestamp >= tmout {
                                     actor.on_system_message(
-                                        &mut context,
+                                        context,
                                         super::SystemMessage::ReceiveTimeout,
                                     );
                                 } else {
@@ -148,7 +155,22 @@ impl<T: 'static + Send> Dispatcher<T> {
                 }
             }
         }
+    }
+    async fn on_message(
+        &mut self,
+        self_ref: &ActorRef<T>,
+        message: Message<T>,
+    ) -> Result<(), PanicError> {
+        let mut context = self.create_context(self_ref);
+        let res = AssertUnwindSafe(self.on_message_in_context(self_ref, &mut context, message))
+            .catch_unwind()
+            .await;
         self.drop_context(self_ref, context);
+
+        match res {
+            Ok(_) => Ok(()),
+            Err(_) => Err(PanicError {}),
+        }
     }
 
     async fn process_message(&mut self, self_ref: &ActorRef<T>, msg: Message<T>) -> bool {
@@ -178,10 +200,8 @@ impl<T: 'static + Send> Dispatcher<T> {
                 true
             }
             _ => {
-                let res = AssertUnwindSafe(self.on_message(self_ref, msg))
-                    .catch_unwind()
-                    .await;
-                if let Err(err) = res {
+                let res = self.on_message(self_ref, msg).await;
+                if let Err(_) = res {
                     //println!("panic occurred {:?}", err);
                     let old_actor = self.actor.take();
                     self.on_exit(old_actor, self_ref);
