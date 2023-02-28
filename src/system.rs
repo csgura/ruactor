@@ -2,6 +2,7 @@ use std::{any::Any, collections::HashMap, sync::Arc};
 
 use std::sync::RwLock;
 
+use crate::actor::ParentRef;
 use crate::ActorError;
 use crate::{
     actor::{Actor, ActorRef, Mailbox},
@@ -14,12 +15,12 @@ pub trait Props<A: Actor>: 'static + Send {
     fn create(&self) -> A;
 }
 
-pub struct PropsFromFunc<A, F>(pub F)
+pub struct PropFunc<A, F>(pub F)
 where
     A: Actor,
     F: Fn() -> A + 'static + Send;
 
-impl<A, F> Props<A> for PropsFromFunc<A, F>
+impl<A, F> Props<A> for PropFunc<A, F>
 where
     A: Actor,
     F: Fn() -> A + 'static + Send,
@@ -29,17 +30,32 @@ where
     }
 }
 
-pub struct PropsFromClone<A>(pub A)
+pub fn props_from_func<A, F>(f: F) -> PropFunc<A, F>
+where
+    A: Actor,
+    F: Fn() -> A + 'static + Send,
+{
+    PropFunc(f)
+}
+
+pub struct PropClone<A>(pub A)
 where
     A: Actor + Clone;
 
-impl<A> Props<A> for PropsFromClone<A>
+impl<A> Props<A> for PropClone<A>
 where
     A: Actor + Clone,
 {
     fn create(&self) -> A {
         self.0.clone()
     }
+}
+
+pub fn props_from_clone<A>(a: A) -> PropClone<A>
+where
+    A: Actor + Clone,
+{
+    PropClone(a)
 }
 
 pub trait PropDyn<T: 'static + Send>: Send + 'static {
@@ -52,6 +68,19 @@ pub struct ActorSystem {
     actors: Arc<RwLock<HashMap<ActorPath, Box<dyn Any + Send + Sync + 'static>>>>,
 }
 
+struct RootActorStoper(Arc<RwLock<HashMap<ActorPath, Box<dyn Any + Send + Sync + 'static>>>>);
+
+impl ParentRef for RootActorStoper {
+    fn send_internal_message(&self, message: crate::actor::InternalMessage) {
+        match message {
+            crate::actor::InternalMessage::ChildTerminate(path) => {
+                let mut m = self.0.write().unwrap();
+                let _removed = m.remove(&path);
+            }
+        }
+    }
+}
+
 impl ActorSystem {
     /// The name given to this actor system
     pub fn name(&self) -> &str {
@@ -60,11 +89,11 @@ impl ActorSystem {
 
     /// Retrieves an actor running in this actor system. If actor does not exist, a None
     /// is returned instead.
-    pub fn get_actor<A: Actor>(&self, path: &ActorPath) -> Option<ActorRef<A::Message>> {
+    pub fn get_actor<M: Send>(&self, path: &ActorPath) -> Option<ActorRef<M>> {
         let actors = self.actors.read().unwrap();
         actors
             .get(path)
-            .and_then(|any| any.downcast_ref::<ActorRef<A::Message>>().cloned())
+            .and_then(|any| any.downcast_ref::<ActorRef<M>>().cloned())
     }
 
     pub(crate) fn create_actor_path<A: Actor, P: Props<A> + Send + 'static>(
@@ -74,12 +103,14 @@ impl ActorSystem {
     ) -> Result<ActorRef<A::Message>, ActorError> {
         log::debug!("Creating actor '{}' on system '{}'...", &path, &self.name);
 
+        let parent = RootActorStoper(self.actors.clone());
+
         let mut actors = self.actors.write().unwrap();
         if actors.contains_key(&path) {
             return Err(ActorError::Exists(path));
         }
 
-        let mbox = Mailbox::new(actor, None);
+        let mbox = Mailbox::new(actor, Some(Box::new(parent)));
 
         let actor_ref = ActorRef::new(path, Arc::new(mbox));
 
@@ -126,7 +157,7 @@ impl ActorSystem {
         F: Props<A> + Send + 'static,
     {
         let actors = self.actors.read();
-        match self.get_actor::<A>(path) {
+        match self.get_actor::<A::Message>(path) {
             Some(actor) => Ok(actor),
             None => {
                 drop(actors);
@@ -136,24 +167,24 @@ impl ActorSystem {
     }
 
     /// Stops the actor on this actor system. All its children will also be stopped.
-    pub fn stop_actor(&self, path: &ActorPath) {
-        log::debug!("Stopping actor '{}' on system '{}'...", &path, &self.name);
-        let mut paths: Vec<ActorPath> = vec![path.clone()];
-        {
-            let running_actors = self.actors.read().unwrap();
-            for running in running_actors.keys() {
-                if running.is_descendant_of(path) {
-                    paths.push(running.clone());
-                }
-            }
-        }
-        paths.sort_unstable();
-        paths.reverse();
-        let mut actors = self.actors.write().unwrap();
-        for path in &paths {
-            actors.remove(path);
-        }
-    }
+    // pub fn stop_actor(&self, path: &ActorPath) {
+    //     log::debug!("Stopping actor '{}' on system '{}'...", &path, &self.name);
+    //     let mut paths: Vec<ActorPath> = vec![path.clone()];
+    //     {
+    //         let running_actors = self.actors.read().unwrap();
+    //         for running in running_actors.keys() {
+    //             if running.is_descendant_of(path) {
+    //                 paths.push(running.clone());
+    //             }
+    //         }
+    //     }
+    //     paths.sort_unstable();
+    //     paths.reverse();
+    //     let mut actors = self.actors.write().unwrap();
+    //     for path in &paths {
+    //         actors.remove(path);
+    //     }
+    // }
 
     /// Creats a new actor system on which you can create actors.
     pub fn new(name: &str) -> Self {

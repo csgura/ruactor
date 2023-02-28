@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use ruactor::{Actor, ActorError, ActorSystem, PropsFromClone};
+use ruactor::{props_from_clone, Actor, ActorError, ActorSystem};
 
 #[derive(Clone)]
 struct Hello {}
@@ -36,7 +36,7 @@ impl Actor for Hello {
 async fn main() -> Result<(), ActorError> {
     let system = ActorSystem::new("test");
 
-    let actor_ref = system.create_actor("test_actor", PropsFromClone(Hello {}))?;
+    let actor_ref = system.create_actor("test_actor", props_from_clone(Hello {}))?;
 
     actor_ref.tell(HelloMessage::Echo);
     actor_ref.tell(HelloMessage::Panic);

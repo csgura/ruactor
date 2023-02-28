@@ -11,15 +11,15 @@ pub use system::ActorSystem;
 #[deprecated]
 pub use system::Props as Prop;
 
+pub use system::props_from_clone;
+pub use system::props_from_func;
 pub use system::Props;
-pub use system::PropsFromClone;
-pub use system::PropsFromFunc;
 
 #[deprecated]
-pub use system::PropsFromClone as PropClone;
+pub use system::PropClone;
 
 #[deprecated]
-pub use system::PropsFromFunc as PropFunc;
+pub use system::PropFunc;
 
 use thiserror::Error;
 use tokio::sync::oneshot;

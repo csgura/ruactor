@@ -1,6 +1,6 @@
 use std::{collections::HashMap, time::Duration};
 
-use ruactor::{ask, Actor, ActorError, ActorRef, ActorSystem, PropsFromClone, ReplyTo};
+use ruactor::{ask, props_from_clone, Actor, ActorError, ActorRef, ActorSystem, ReplyTo};
 
 type Addr = String;
 
@@ -239,7 +239,7 @@ impl Actor for MainActor {
             } => {
                 let child = context.get_or_create_child(
                     addr.clone(),
-                    PropsFromClone(ChildActor {
+                    props_from_clone(ChildActor {
                         _cfg: self.cfg.clone(),
                         addr: addr.clone(),
                     }),
@@ -253,7 +253,7 @@ impl Actor for MainActor {
             ClientMessage::PrepareConnection { addr, num_conn } => {
                 let child = context.get_or_create_child(
                     addr.clone(),
-                    PropsFromClone(ChildActor {
+                    props_from_clone(ChildActor {
                         _cfg: self.cfg.clone(),
                         addr: addr.clone(),
                     }),
@@ -277,7 +277,7 @@ impl Client {
     pub fn new(asys: ActorSystem) -> Self {
         let cfg = new_config();
         let actor_ref = asys
-            .create_actor("sbigw-main-actor", PropsFromClone(MainActor { cfg }))
+            .create_actor("sbigw-main-actor", props_from_clone(MainActor { cfg }))
             .expect("actor creation failed");
 
         Client { actor_ref }
