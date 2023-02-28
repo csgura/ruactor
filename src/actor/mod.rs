@@ -12,7 +12,7 @@ mod mailbox;
 
 use crate::{
     path::ActorPath,
-    system::{Prop, PropDyn},
+    system::{PropDyn, Props},
 };
 
 pub(crate) trait InternalActorRef: 'static + Send {
@@ -138,12 +138,12 @@ pub trait Actor: Send + 'static {
     }
 }
 
-struct PropWrap<A: Actor, P: Prop<A>> {
+struct PropWrap<A: Actor, P: Props<A>> {
     prop: P,
     phantom: PhantomData<A>,
 }
 
-impl<A: Actor, P: Prop<A>> PropDyn<A::Message> for PropWrap<A, P> {
+impl<A: Actor, P: Props<A>> PropDyn<A::Message> for PropWrap<A, P> {
     fn create(&self) -> Box<dyn Actor<Message = A::Message>> {
         Box::new(self.prop.create())
     }

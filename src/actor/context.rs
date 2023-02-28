@@ -5,7 +5,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::{Actor, Prop};
+use crate::{Actor, Props};
 
 use super::{
     dispatcher::TimerMessage, ActorRef, ChildContainer, Mailbox, Message, ParentRef, Timer,
@@ -144,7 +144,7 @@ impl<T: 'static + Send> ActorContext<T> {
         ret
     }
 
-    pub fn get_or_create_child<A: Actor, P: Prop<A>>(
+    pub fn get_or_create_child<A: Actor, P: Props<A>>(
         &mut self,
         name: String,
         prop: P,

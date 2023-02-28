@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use ruactor::{ask, reply_to, Actor, ActorError, ActorSystem, PropClone, ReplyTo};
+use ruactor::{ask, reply_to, Actor, ActorError, ActorSystem, PropsFromClone, ReplyTo};
 
 #[derive(Clone)]
 struct IdleState;
@@ -76,7 +76,7 @@ impl Actor for IdleState {
 #[tokio::test]
 async fn unstash_test() -> Result<(), ActorError> {
     let asys = ActorSystem::new("test");
-    let actor_ref = asys.create_actor("main", PropClone(IdleState))?;
+    let actor_ref = asys.create_actor("main", PropsFromClone(IdleState))?;
 
     println!("hello??");
     let tmout = Duration::from_secs(10);

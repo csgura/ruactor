@@ -8,9 +8,19 @@ pub use actor::ActorRef;
 pub use actor::SystemMessage;
 pub use path::ActorPath;
 pub use system::ActorSystem;
-pub use system::Prop;
-pub use system::PropClone;
-pub use system::PropFunc;
+#[deprecated]
+pub use system::Props as Prop;
+
+pub use system::Props;
+pub use system::PropsFromClone;
+pub use system::PropsFromFunc;
+
+#[deprecated]
+pub use system::PropsFromClone as PropClone;
+
+#[deprecated]
+pub use system::PropsFromFunc as PropFunc;
+
 use thiserror::Error;
 use tokio::sync::oneshot;
 use tokio::time::error::Elapsed;

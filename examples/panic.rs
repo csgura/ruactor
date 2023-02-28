@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use ruactor::{Actor, ActorError, ActorSystem, PropClone};
+use ruactor::{Actor, ActorError, ActorSystem, PropsFromClone};
 
 #[derive(Clone)]
 struct Hello {}
@@ -13,12 +13,12 @@ enum HelloMessage {
 impl Actor for Hello {
     type Message = HelloMessage;
 
-    fn on_enter(&mut self, context: &mut ruactor::ActorContext<Self::Message>) {
+    fn on_enter(&mut self, _context: &mut ruactor::ActorContext<Self::Message>) {
         println!("enter hello");
     }
     fn on_message(
         &mut self,
-        context: &mut ruactor::ActorContext<Self::Message>,
+        _context: &mut ruactor::ActorContext<Self::Message>,
         message: Self::Message,
     ) {
         match message {
@@ -27,7 +27,7 @@ impl Actor for Hello {
         }
     }
 
-    fn on_exit(&mut self, context: &mut ruactor::ActorContext<Self::Message>) {
+    fn on_exit(&mut self, _context: &mut ruactor::ActorContext<Self::Message>) {
         println!("exit hello");
     }
 }
@@ -36,7 +36,7 @@ impl Actor for Hello {
 async fn main() -> Result<(), ActorError> {
     let system = ActorSystem::new("test");
 
-    let actor_ref = system.create_actor("test_actor", PropClone(Hello {}))?;
+    let actor_ref = system.create_actor("test_actor", PropsFromClone(Hello {}))?;
 
     actor_ref.tell(HelloMessage::Echo);
     actor_ref.tell(HelloMessage::Panic);

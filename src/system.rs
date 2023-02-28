@@ -10,16 +10,16 @@ use crate::{
 
 /// Events that this actor system will send
 
-pub trait Prop<A: Actor>: 'static + Send {
+pub trait Props<A: Actor>: 'static + Send {
     fn create(&self) -> A;
 }
 
-pub struct PropFunc<A, F>(pub F)
+pub struct PropsFromFunc<A, F>(pub F)
 where
     A: Actor,
     F: Fn() -> A + 'static + Send;
 
-impl<A, F> Prop<A> for PropFunc<A, F>
+impl<A, F> Props<A> for PropsFromFunc<A, F>
 where
     A: Actor,
     F: Fn() -> A + 'static + Send,
@@ -29,11 +29,11 @@ where
     }
 }
 
-pub struct PropClone<A>(pub A)
+pub struct PropsFromClone<A>(pub A)
 where
     A: Actor + Clone;
 
-impl<A> Prop<A> for PropClone<A>
+impl<A> Props<A> for PropsFromClone<A>
 where
     A: Actor + Clone,
 {
@@ -67,7 +67,7 @@ impl ActorSystem {
             .and_then(|any| any.downcast_ref::<ActorRef<A::Message>>().cloned())
     }
 
-    pub(crate) fn create_actor_path<A: Actor, P: Prop<A> + Send + 'static>(
+    pub(crate) fn create_actor_path<A: Actor, P: Props<A> + Send + 'static>(
         &self,
         path: ActorPath,
         actor: P,
@@ -93,7 +93,7 @@ impl ActorSystem {
 
     /// Launches a new top level actor on this actor system at the '/user' actor path. If another actor with
     /// the same name already exists, an `Err(ActorError::Exists(ActorPath))` is returned instead.
-    pub fn create_actor<A: Actor, P: Prop<A> + Send + 'static>(
+    pub fn create_actor<A: Actor, P: Props<A> + Send + 'static>(
         &self,
         name: &str,
         actor: P,
@@ -110,7 +110,7 @@ impl ActorSystem {
     ) -> Result<ActorRef<A::Message>, ActorError>
     where
         A: Actor,
-        F: Prop<A> + Send + 'static,
+        F: Props<A> + Send + 'static,
     {
         let path = ActorPath::from("/user") / name;
         self.get_or_create_actor_path(&path, actor_fn)
@@ -123,7 +123,7 @@ impl ActorSystem {
     ) -> Result<ActorRef<A::Message>, ActorError>
     where
         A: Actor,
-        F: Prop<A> + Send + 'static,
+        F: Props<A> + Send + 'static,
     {
         let actors = self.actors.read();
         match self.get_actor::<A>(path) {

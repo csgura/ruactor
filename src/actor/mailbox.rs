@@ -10,7 +10,7 @@ use std::{
 use crossbeam::queue::SegQueue;
 use tokio::sync::Mutex;
 
-use crate::{Actor, Prop};
+use crate::{Actor, Props};
 
 use super::{
     context::ActorCell, ActorRef, Dispatcher, InternalMessage, Message, ParentRef, PropWrap,
@@ -68,7 +68,7 @@ pub(crate) async fn receive<T: 'static + Send>(self_ref: ActorRef<T>) {
 impl<T: 'static + Send> Mailbox<T> {
     pub(crate) fn new<P, A>(p: P, parent: Option<Box<dyn ParentRef>>) -> Mailbox<T>
     where
-        P: Prop<A>,
+        P: Props<A>,
         A: Actor<Message = T>,
     {
         let pdyn = PropWrap {
