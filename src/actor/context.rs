@@ -25,6 +25,7 @@ pub struct ActorCell<T: 'static + Send> {
     pub(crate) childrens: HashMap<String, ChildContainer>,
     pub(crate) receive_timeout: Option<Duration>,
     pub(crate) timer_gen: u32,
+    pub(crate) next_name_offset: usize,
 }
 
 impl<T: 'static + Send> Default for ActorCell<T> {
@@ -37,6 +38,7 @@ impl<T: 'static + Send> Default for ActorCell<T> {
             childrens: Default::default(),
             receive_timeout: Default::default(),
             timer_gen: Default::default(),
+            next_name_offset: 0,
         }
     }
 }
@@ -47,6 +49,20 @@ impl<T: 'static + Send> ActorCell<T> {
             parent,
             ..Default::default()
         }
+    }
+}
+
+const base64chars: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+~";
+
+fn base64(l: usize, s: String) -> String {
+    let mut s = s;
+    let ch = base64chars.chars().nth(l & 63).unwrap_or('~');
+    s.push(ch);
+    let next = l >> 6;
+    if next == 0 {
+        s
+    } else {
+        base64(next, s)
     }
 }
 
@@ -144,6 +160,17 @@ impl<T: 'static + Send> ActorContext<T> {
         ret
     }
 
+    fn random_name(&mut self) -> String {
+        let num = self.cell.next_name_offset;
+        self.cell.next_name_offset = self.cell.next_name_offset.checked_add(1).unwrap_or(0);
+        base64(num, "$".into())
+    }
+
+    pub fn create_child<A: Actor, P: Props<A>>(&mut self, prop: P) -> ActorRef<A::Message> {
+        let name = self.random_name();
+        self.get_or_create_child(name, prop)
+    }
+
     pub fn get_or_create_child<A: Actor, P: Props<A>>(
         &mut self,
         name: String,
@@ -173,5 +200,33 @@ impl<T: 'static + Send> ActorContext<T> {
 
     pub fn stop_self(&mut self) {
         self.self_ref.send(Message::Terminate);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::base64;
+
+    #[test]
+    fn base64_test() {
+        let l = 0;
+        let res = base64(l, "$".into());
+        assert_eq!(res, "$a");
+
+        let l = 3;
+        let res = base64(l, "$".into());
+        assert_eq!(res, "$d");
+
+        let l = 63;
+        let res = base64(l, "$".into());
+        assert_eq!(res, "$~");
+
+        let l = 64;
+        let res = base64(l, "$".into());
+        assert_eq!(res, "$ab");
+
+        let l = 69;
+        let res = base64(l, "$".into());
+        assert_eq!(res, "$fb");
     }
 }
