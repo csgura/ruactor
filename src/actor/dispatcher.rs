@@ -6,6 +6,7 @@ use std::panic::AssertUnwindSafe;
 use std::time::Instant;
 
 use futures::FutureExt;
+use tokio::task::JoinSet;
 
 use super::context::ActorCell;
 use super::context::ActorContext;
@@ -150,7 +151,7 @@ impl<T: 'static + Send> Dispatcher<T> {
                     }
                 }
 
-                Message::Terminate => {
+                Message::Terminate(_) => {
                     // covered by actor loop
                 }
             }
@@ -175,8 +176,9 @@ impl<T: 'static + Send> Dispatcher<T> {
 
     async fn process_message(&mut self, self_ref: &ActorRef<T>, msg: Message<T>) -> bool {
         match msg {
-            Message::Terminate => {
+            Message::Terminate(reply_to) => {
                 //println!("stop actor {}", self_ref);
+                self_ref.mbox.close();
 
                 let da = None;
                 let old_actor = replace(&mut self.actor, da);
@@ -189,14 +191,24 @@ impl<T: 'static + Send> Dispatcher<T> {
                     )
                 }
 
-                self.cell.childrens.iter().for_each(|x| {
-                    let child_ref = x.1.stop_ref.as_ref();
-                    child_ref.stop();
-                });
+                {
+                    let childs = replace(&mut self.cell.childrens, Default::default());
 
-                self.cell.childrens.clear();
+                    let mut join_set = JoinSet::new();
 
-                self_ref.mbox.close();
+                    let mut childs = childs.into_iter().collect::<Vec<_>>();
+                    while let Some((_, ch)) = childs.pop() {
+                        join_set.spawn(async move { ch.stop_ref.wait_stop().await });
+                    }
+
+                    while let Some(_) = join_set.join_next().await {}
+                }
+
+                if let Some(sender) = reply_to {
+                    let _ = sender.send(());
+                }
+                //self.cell.childrens.clear();
+
                 true
             }
             _ => {

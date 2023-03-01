@@ -52,11 +52,11 @@ impl<T: 'static + Send> ActorCell<T> {
     }
 }
 
-const base64chars: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+~";
+const BASE64CHARS: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+~";
 
 fn base64(l: usize, s: String) -> String {
     let mut s = s;
-    let ch = base64chars.chars().nth(l & 63).unwrap_or('~');
+    let ch = BASE64CHARS.chars().nth(l & 63).unwrap_or('~');
     s.push(ch);
     let next = l >> 6;
     if next == 0 {
@@ -199,7 +199,7 @@ impl<T: 'static + Send> ActorContext<T> {
     }
 
     pub fn stop_self(&mut self) {
-        self.self_ref.send(Message::Terminate);
+        self.self_ref.send(Message::Terminate(None));
     }
 }
 

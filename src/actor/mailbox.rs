@@ -135,7 +135,9 @@ impl<T: 'static + Send> Mailbox<T> {
     }
 
     pub(crate) fn send_internal(&self, self_ref: ActorRef<T>, msg: InternalMessage) {
-        self.internal_queue.push(msg);
-        self.schedule(self_ref);
+        if !self.is_terminated() {
+            self.internal_queue.push(msg);
+            self.schedule(self_ref);
+        }
     }
 }

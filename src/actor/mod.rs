@@ -13,10 +13,13 @@ mod mailbox;
 use crate::{
     path::ActorPath,
     system::{PropDyn, Props},
+    ActorError, ReplyTo,
 };
 
-pub(crate) trait InternalActorRef: 'static + Send {
+#[async_trait]
+pub(crate) trait InternalActorRef: 'static + Send + Sync {
     fn stop(&self);
+    async fn wait_stop(&self) -> Result<(), ActorError>;
 }
 
 pub struct ActorRef<T: 'static + Send> {
@@ -24,9 +27,19 @@ pub struct ActorRef<T: 'static + Send> {
     path: ActorPath,
 }
 
+#[async_trait]
 impl<T: 'static + Send> InternalActorRef for ActorRef<T> {
     fn stop(&self) {
-        self.send(Message::Terminate);
+        self.send(Message::Terminate(None));
+    }
+
+    async fn wait_stop(&self) -> Result<(), ActorError> {
+        let ch = tokio::sync::oneshot::channel();
+
+        self.send(Message::Terminate(Some(ch.0)));
+
+        let ret = ch.1.await?;
+        Ok(ret)
     }
 }
 
@@ -103,7 +116,7 @@ pub(crate) enum Message<T: 'static + Send> {
     User(T),
     Timer(String, u32, T),
     ReceiveTimeout(Instant),
-    Terminate,
+    Terminate(Option<ReplyTo<()>>),
 }
 
 #[derive(Debug)]
