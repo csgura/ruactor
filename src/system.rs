@@ -2,7 +2,9 @@ use std::{any::Any, collections::HashMap, sync::Arc};
 
 use std::sync::RwLock;
 
-use crate::actor::ParentRef;
+use tokio::runtime::{Handle, RuntimeFlavor};
+
+use crate::actor::{ChildContainer, ParentRef};
 use crate::ActorError;
 use crate::{
     actor::{Actor, ActorRef, Mailbox},
@@ -65,10 +67,45 @@ pub trait PropDyn<T: 'static + Send>: Send + 'static {
 #[derive(Clone)]
 pub struct ActorSystem {
     name: String,
-    actors: Arc<RwLock<HashMap<ActorPath, Box<dyn Any + Send + Sync + 'static>>>>,
+    actors: Arc<RwLock<HashMap<ActorPath, ChildContainer>>>,
 }
 
-struct RootActorStoper(Arc<RwLock<HashMap<ActorPath, Box<dyn Any + Send + Sync + 'static>>>>);
+impl Drop for ActorSystem {
+    fn drop(&mut self) {
+        let actors = self.actors.clone();
+        let h = Handle::try_current();
+        match h {
+            Ok(h) if h.runtime_flavor() == RuntimeFlavor::MultiThread => {
+                tokio::task::block_in_place(|| {
+                    Handle::current().block_on(async move {
+                        let keys = {
+                            let actors = actors.read().unwrap();
+
+                            actors.keys().map(|v| v.clone()).collect::<Vec<_>>()
+                        };
+
+                        for k in keys {
+                            let _ = self.stop_actor_wait(&k).await;
+                        }
+                    })
+                });
+            }
+            _ => {
+                let keys = {
+                    let actors = actors.read().unwrap();
+
+                    actors.keys().map(|v| v.clone()).collect::<Vec<_>>()
+                };
+
+                for k in keys {
+                    self.stop_actor(&k);
+                }
+            }
+        }
+    }
+}
+
+struct RootActorStoper(Arc<RwLock<HashMap<ActorPath, ChildContainer>>>);
 
 impl ParentRef for RootActorStoper {
     fn send_internal_message(&self, message: crate::actor::InternalMessage) {
@@ -82,6 +119,28 @@ impl ParentRef for RootActorStoper {
 }
 
 impl ActorSystem {
+    async fn stop_actor_wait(&self, path: &ActorPath) {
+        let actor = {
+            let mut actors = self.actors.write().unwrap();
+            actors.remove(path)
+        };
+
+        if let Some(actor) = actor {
+            let _ = actor.stop_ref.wait_stop().await;
+        }
+    }
+
+    fn stop_actor(&self, path: &ActorPath) {
+        let actor = {
+            let mut actors = self.actors.write().unwrap();
+            actors.remove(path)
+        };
+
+        if let Some(actor) = actor {
+            let _ = actor.stop_ref.stop();
+        }
+    }
+
     /// The name given to this actor system
     pub fn name(&self) -> &str {
         &self.name
@@ -93,7 +152,7 @@ impl ActorSystem {
         let actors = self.actors.read().unwrap();
         actors
             .get(path)
-            .and_then(|any| any.downcast_ref::<ActorRef<M>>().cloned())
+            .and_then(|any| any.actor_ref.downcast_ref::<ActorRef<M>>().cloned())
     }
 
     pub(crate) fn create_actor_path<A: Actor, P: Props<A> + Send + 'static>(
@@ -117,7 +176,13 @@ impl ActorSystem {
         let path = actor_ref.path().clone();
         let any = Box::new(actor_ref.clone());
 
-        actors.insert(path, any);
+        actors.insert(
+            path,
+            ChildContainer {
+                actor_ref: any,
+                stop_ref: Box::new(actor_ref.clone()),
+            },
+        );
 
         Ok(actor_ref)
     }

@@ -17,7 +17,7 @@ use crate::{
 };
 
 #[async_trait]
-pub(crate) trait InternalActorRef: 'static + Send + Sync {
+pub(crate) trait InternalActorRef: 'static + Send + Sync + Debug {
     fn stop(&self);
     async fn wait_stop(&self) -> Result<(), ActorError>;
 }
@@ -163,6 +163,6 @@ impl<A: Actor, P: Props<A>> PropDyn<A::Message> for PropWrap<A, P> {
 }
 
 pub(crate) struct ChildContainer {
-    actor_ref: Box<dyn Any + Send + Sync + 'static>,
-    stop_ref: Box<dyn InternalActorRef>,
+    pub(crate) actor_ref: Box<dyn Any + Send + Sync + 'static>,
+    pub(crate) stop_ref: Box<dyn InternalActorRef>,
 }

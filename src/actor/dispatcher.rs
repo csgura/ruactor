@@ -209,6 +209,8 @@ impl<T: 'static + Send> Dispatcher<T> {
                 }
                 //self.cell.childrens.clear();
 
+                //println!("{} stop complete", self_ref);
+
                 true
             }
             _ => {
