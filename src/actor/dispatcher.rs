@@ -175,6 +175,8 @@ impl<T: 'static + Send> Dispatcher<T> {
     }
 
     async fn process_message(&mut self, self_ref: &ActorRef<T>, msg: Message<T>) -> bool {
+        self.process_internal_message_all(&self_ref);
+
         match msg {
             Message::Terminate(reply_to) => {
                 //println!("stop actor {}", self_ref);
@@ -246,6 +248,19 @@ impl<T: 'static + Send> Dispatcher<T> {
         self_ref.mbox.internal_queue.pop()
     }
 
+    fn process_internal_message_all(&mut self, self_ref: &ActorRef<T>) {
+        while let Some(msg) = self.pop_internal_message(self_ref) {
+            self.on_internal_message(self_ref, msg);
+        }
+    }
+
+    async fn next_message(&mut self, self_ref: &ActorRef<T>) -> Option<Message<T>> {
+        if let Some(msg) = self.cell.unstashed.pop() {
+            return Some(Message::User(msg));
+        }
+        self_ref.mbox.message_queue.pop()
+    }
+
     pub async fn actor_loop(&mut self, self_ref: ActorRef<T>) {
         if self.actor.is_none() {
             self.actor = Some(self.prop.create());
@@ -261,42 +276,19 @@ impl<T: 'static + Send> Dispatcher<T> {
             return;
         }
 
+        self.process_internal_message_all(&self_ref);
         let mut count = 0;
-        loop {
-            while let Some(msg) = self.pop_internal_message(&self_ref) {
-                self.on_internal_message(&self_ref, msg);
-            }
-
-            if self.cell.unstashed.len() > 0 {
-                while let Some(msg) = self.cell.unstashed.pop() {
-                    count += 1;
-
-                    if count >= 100 {
-                        count = 0;
-                        tokio::task::yield_now().await;
-                    }
-
-                    self.process_message(&self_ref, Message::User(msg)).await;
-                }
-            }
-
-            if self.num_user_message(&self_ref) > 0 {
-                if let Some(msg) = self_ref.mbox.message_queue.pop() {
-                    count += 1;
-                    let stop_flag = self.process_message(&self_ref, msg).await;
-                    if stop_flag {
-                        break;
-                    }
-                } else {
-                    break;
-                }
-            } else if self.num_total_message(&self_ref) == 0 {
-                break;
-            }
+        while let Some(msg) = self.next_message(&self_ref).await {
+            let stop_flag = self.process_message(&self_ref, msg).await;
+            count += 1;
 
             if count >= 100 {
                 count = 0;
                 tokio::task::yield_now().await;
+            }
+
+            if stop_flag {
+                break;
             }
         }
     }
