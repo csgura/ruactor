@@ -41,27 +41,22 @@ pub struct Mailbox<T: 'static + Send> {
 pub(crate) async fn receive<T: 'static + Send>(self_ref: ActorRef<T>) {
     let mbox = self_ref.mbox.as_ref();
 
-    let mut owned = false;
-
     if let Ok(mut dispatcher) = mbox.dispatcher.try_lock() {
         //println!("start receive loop");
 
-        owned = true;
-        mbox.running.store(true, Ordering::SeqCst);
+        //mbox.running.store(true, Ordering::SeqCst);
         dispatcher.actor_loop(self_ref.clone()).await;
         mbox.running.store(false, Ordering::SeqCst);
-        //println!("end receive loop");
-    } else {
-        //println!("lock failed");
-    }
-
-    if owned {
+        drop(dispatcher);
         let num_msg = mbox.num_total_message();
         if num_msg > 0 {
             //println!("num msg = {}", num_msg);
             //mbox.receive().await;
             mbox.schedule(self_ref.clone());
         }
+        //println!("end receive loop");
+    } else {
+        //println!("lock failed");
     }
 }
 
@@ -105,18 +100,28 @@ impl<T: 'static + Send> Mailbox<T> {
     }
 
     pub(crate) fn schedule(&self, self_ref: ActorRef<T>) {
-        if !self.running.load(Ordering::SeqCst) {
-            //println!("schedule");
-            //let cl: Mailbox<T> = self.clone();
-
+        if let Ok(_) =
+            self.running
+                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        {
             self.handle.spawn(async move {
                 receive(self_ref.clone()).await
                 //cl.status.store(true, std::sync::atomic::Ordering::SeqCst);
                 //actor_loop( &mut cell ).await;
             });
-        } else {
-            //println!("not schedule");
         }
+        // if !self.running.load(Ordering::SeqCst) {
+        //     //println!("schedule");
+        //     //let cl: Mailbox<T> = self.clone();
+
+        //     self.handle.spawn(async move {
+        //         receive(self_ref.clone()).await
+        //         //cl.status.store(true, std::sync::atomic::Ordering::SeqCst);
+        //         //actor_loop( &mut cell ).await;
+        //     });
+        // } else {
+        //     //println!("not schedule");
+        // }
     }
 
     pub(crate) fn is_terminated(&self) -> bool {
