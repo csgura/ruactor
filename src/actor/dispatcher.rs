@@ -234,10 +234,6 @@ impl<T: 'static + Send> Dispatcher<T> {
         self_ref.mbox.internal_queue.len()
     }
 
-    fn num_user_message(&self, self_ref: &ActorRef<T>) -> usize {
-        self_ref.mbox.message_queue.len()
-    }
-
     fn num_total_message(&self, self_ref: &ActorRef<T>) -> usize {
         self.num_internal_message(self_ref)
             + self_ref.mbox.message_queue.len()
@@ -280,15 +276,15 @@ impl<T: 'static + Send> Dispatcher<T> {
         let mut count = 0;
         while let Some(msg) = self.next_message(&self_ref).await {
             let stop_flag = self.process_message(&self_ref, msg).await;
+            if stop_flag {
+                break;
+            }
+
             count += 1;
 
             if count >= 100 {
                 count = 0;
                 tokio::task::yield_now().await;
-            }
-
-            if stop_flag {
-                break;
             }
         }
     }

@@ -5,6 +5,7 @@ use ruactor::{props_from_clone, Actor, ActorError, ActorRef, ActorSystem, PropCl
 #[derive(Clone)]
 struct PPP;
 
+#[allow(dead_code)]
 enum RootMessage {
     StopSelf,
 }
@@ -22,8 +23,8 @@ impl Actor for PP {
 
     fn on_message(
         &mut self,
-        context: &mut ruactor::ActorContext<Self::Message>,
-        message: Self::Message,
+        _context: &mut ruactor::ActorContext<Self::Message>,
+        _message: Self::Message,
     ) {
     }
 
@@ -45,8 +46,8 @@ impl Actor for P {
 
     fn on_message(
         &mut self,
-        context: &mut ruactor::ActorContext<Self::Message>,
-        message: Self::Message,
+        _context: &mut ruactor::ActorContext<Self::Message>,
+        _message: Self::Message,
     ) {
     }
     fn on_exit(&mut self, _context: &mut ruactor::ActorContext<Self::Message>) {
@@ -62,8 +63,8 @@ impl Actor for C {
 
     fn on_message(
         &mut self,
-        context: &mut ruactor::ActorContext<Self::Message>,
-        message: Self::Message,
+        _context: &mut ruactor::ActorContext<Self::Message>,
+        _message: Self::Message,
     ) {
     }
 
