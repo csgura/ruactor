@@ -69,6 +69,14 @@ macro_rules! ask {
         }
     };
 
+    ($actor_ref:expr, $enum_name:ident::$variant:ident( _ ) , $tmout:expr ) => {
+        {
+            let (reply_to, rx) = tokio::sync::oneshot::channel();
+            let m = $enum_name::$variant( reply_to );
+			ask!(@tell: $actor_ref , m , rx, $tmout)
+        }
+    };
+
     ($actor_ref:expr, $enum_name:ident::$variant:ident( _, $($e:expr),* ) , $tmout:expr ) => {
         {
             let (reply_to, rx) = tokio::sync::oneshot::channel();
