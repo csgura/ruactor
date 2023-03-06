@@ -44,8 +44,10 @@ pub(crate) async fn receive<T: 'static + Send>(self_ref: ActorRef<T>) {
     if let Ok(mut dispatcher) = mbox.dispatcher.try_lock() {
         mbox.running.store(true, Ordering::SeqCst);
         dispatcher.actor_loop(self_ref.clone()).await;
-        mbox.running.store(false, Ordering::SeqCst);
         drop(dispatcher);
+
+        mbox.running.store(false, Ordering::SeqCst);
+
         let num_msg = mbox.num_total_message();
         if num_msg > 0 {
             mbox.schedule(self_ref.clone());
@@ -93,20 +95,20 @@ impl<T: 'static + Send> Mailbox<T> {
     }
 
     pub(crate) fn schedule(&self, self_ref: ActorRef<T>) {
-        // if let Ok(_) =
-        //     self.running
-        //         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-        // {
-        //     self.handle.spawn(async move {
-        //         receive(self_ref.clone()).await
-        //         //cl.status.store(true, std::sync::atomic::Ordering::SeqCst);
-        //         //actor_loop( &mut cell ).await;
-        //     });
-        // }
-        if !self.running.load(Ordering::SeqCst) {
-            self.handle
-                .spawn(async move { receive(self_ref.clone()).await });
+        if let Ok(_) =
+            self.running
+                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        {
+            self.handle.spawn(async move {
+                receive(self_ref.clone()).await
+                //cl.status.store(true, std::sync::atomic::Ordering::SeqCst);
+                //actor_loop( &mut cell ).await;
+            });
         }
+        // if !self.running.load(Ordering::SeqCst) {
+        //     self.handle
+        //         .spawn(async move { receive(self_ref.clone()).await });
+        // }
     }
 
     pub(crate) fn is_terminated(&self) -> bool {
