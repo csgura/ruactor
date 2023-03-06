@@ -70,40 +70,40 @@ pub struct ActorSystem {
     actors: Arc<RwLock<HashMap<ActorPath, ChildContainer>>>,
 }
 
-impl Drop for ActorSystem {
-    fn drop(&mut self) {
-        let actors = self.actors.clone();
-        let h = Handle::try_current();
-        match h {
-            Ok(h) if h.runtime_flavor() == RuntimeFlavor::MultiThread => {
-                tokio::task::block_in_place(|| {
-                    Handle::current().block_on(async move {
-                        let keys = {
-                            let actors = actors.read().unwrap();
+// impl Drop for ActorSystem {
+//     fn drop(&mut self) {
+//         let actors = self.actors.clone();
+//         let h = Handle::try_current();
+//         match h {
+//             Ok(h) if h.runtime_flavor() == RuntimeFlavor::MultiThread => {
+//                 tokio::task::block_in_place(|| {
+//                     Handle::current().block_on(async move {
+//                         let keys = {
+//                             let actors = actors.read().unwrap();
 
-                            actors.keys().map(|v| v.clone()).collect::<Vec<_>>()
-                        };
+//                             actors.keys().map(|v| v.clone()).collect::<Vec<_>>()
+//                         };
 
-                        for k in keys {
-                            let _ = self.stop_actor_wait(&k).await;
-                        }
-                    })
-                });
-            }
-            _ => {
-                let keys = {
-                    let actors = actors.read().unwrap();
+//                         for k in keys {
+//                             let _ = self.stop_actor_wait(&k).await;
+//                         }
+//                     })
+//                 });
+//             }
+//             _ => {
+//                 let keys = {
+//                     let actors = actors.read().unwrap();
 
-                    actors.keys().map(|v| v.clone()).collect::<Vec<_>>()
-                };
+//                     actors.keys().map(|v| v.clone()).collect::<Vec<_>>()
+//                 };
 
-                for k in keys {
-                    self.stop_actor(&k);
-                }
-            }
-        }
-    }
-}
+//                 for k in keys {
+//                     self.stop_actor(&k);
+//                 }
+//             }
+//         }
+//     }
+// }
 
 struct RootActorStoper(Arc<RwLock<HashMap<ActorPath, ChildContainer>>>);
 
