@@ -1,6 +1,9 @@
+use std::ops::Deref;
 use std::{collections::HashMap, sync::Arc};
 
 use std::sync::RwLock;
+
+use tokio::runtime::{Handle, RuntimeFlavor};
 
 use crate::actor::{ChildContainer, ParentRef};
 use crate::ActorError;
@@ -62,48 +65,80 @@ pub trait PropDyn<T: 'static + Send>: Send + 'static {
     fn create(&self) -> Box<dyn Actor<Message = T>>;
 }
 
+struct UserGuard(RwLock<HashMap<ActorPath, ChildContainer>>);
+
+impl Deref for UserGuard {
+    type Target = RwLock<HashMap<ActorPath, ChildContainer>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 #[derive(Clone)]
 pub struct ActorSystem {
     name: String,
-    actors: Arc<RwLock<HashMap<ActorPath, ChildContainer>>>,
+    actors: Arc<UserGuard>,
 }
 
-// impl Drop for ActorSystem {
-//     fn drop(&mut self) {
-//         let actors = self.actors.clone();
-//         let h = Handle::try_current();
-//         match h {
-//             Ok(h) if h.runtime_flavor() == RuntimeFlavor::MultiThread => {
-//                 tokio::task::block_in_place(|| {
-//                     Handle::current().block_on(async move {
-//                         let keys = {
-//                             let actors = actors.read().unwrap();
+impl UserGuard {
+    async fn stop_actor_wait(&self, path: &ActorPath) {
+        let actor = {
+            let mut actors = self.0.write().unwrap();
+            actors.remove(path)
+        };
 
-//                             actors.keys().map(|v| v.clone()).collect::<Vec<_>>()
-//                         };
+        if let Some(actor) = actor {
+            let _ = actor.stop_ref.wait_stop().await;
+        }
+    }
 
-//                         for k in keys {
-//                             let _ = self.stop_actor_wait(&k).await;
-//                         }
-//                     })
-//                 });
-//             }
-//             _ => {
-//                 let keys = {
-//                     let actors = actors.read().unwrap();
+    fn stop_actor(&self, path: &ActorPath) {
+        let actor = {
+            let mut actors = self.0.write().unwrap();
+            actors.remove(path)
+        };
 
-//                     actors.keys().map(|v| v.clone()).collect::<Vec<_>>()
-//                 };
+        if let Some(actor) = actor {
+            let _ = actor.stop_ref.stop();
+        }
+    }
+}
+impl Drop for UserGuard {
+    fn drop(&mut self) {
+        let h = Handle::try_current();
+        match h {
+            Ok(h) if h.runtime_flavor() == RuntimeFlavor::MultiThread => {
+                tokio::task::block_in_place(|| {
+                    Handle::current().block_on(async move {
+                        let keys = {
+                            let actors = self.0.read().unwrap();
 
-//                 for k in keys {
-//                     self.stop_actor(&k);
-//                 }
-//             }
-//         }
-//     }
-// }
+                            actors.keys().map(|v| v.clone()).collect::<Vec<_>>()
+                        };
 
-struct RootActorStoper(Arc<RwLock<HashMap<ActorPath, ChildContainer>>>);
+                        for k in keys {
+                            let _ = self.stop_actor_wait(&k).await;
+                        }
+                    })
+                });
+            }
+            _ => {
+                let keys = {
+                    let actors = self.0.read().unwrap();
+
+                    actors.keys().map(|v| v.clone()).collect::<Vec<_>>()
+                };
+
+                for k in keys {
+                    self.stop_actor(&k);
+                }
+            }
+        }
+    }
+}
+
+struct RootActorStoper(Arc<UserGuard>);
 
 impl ParentRef for RootActorStoper {
     fn send_internal_message(&self, message: crate::actor::InternalMessage) {
@@ -117,28 +152,6 @@ impl ParentRef for RootActorStoper {
 }
 
 impl ActorSystem {
-    async fn stop_actor_wait(&self, path: &ActorPath) {
-        let actor = {
-            let mut actors = self.actors.write().unwrap();
-            actors.remove(path)
-        };
-
-        if let Some(actor) = actor {
-            let _ = actor.stop_ref.wait_stop().await;
-        }
-    }
-
-    fn stop_actor(&self, path: &ActorPath) {
-        let actor = {
-            let mut actors = self.actors.write().unwrap();
-            actors.remove(path)
-        };
-
-        if let Some(actor) = actor {
-            let _ = actor.stop_ref.stop();
-        }
-    }
-
     /// The name given to this actor system
     pub fn name(&self) -> &str {
         &self.name
@@ -252,7 +265,10 @@ impl ActorSystem {
     /// Creats a new actor system on which you can create actors.
     pub fn new(name: &str) -> Self {
         let name = name.to_string();
-        let actors = Arc::new(RwLock::new(HashMap::new()));
-        ActorSystem { name, actors }
+        let actors = RwLock::new(HashMap::new());
+        ActorSystem {
+            name,
+            actors: Arc::new(UserGuard(actors)),
+        }
     }
 }
