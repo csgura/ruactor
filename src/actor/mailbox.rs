@@ -42,21 +42,14 @@ pub(crate) async fn receive<T: 'static + Send>(self_ref: ActorRef<T>) {
     let mbox = self_ref.mbox.as_ref();
 
     if let Ok(mut dispatcher) = mbox.dispatcher.try_lock() {
-        //println!("start receive loop");
-
-        //mbox.running.store(true, Ordering::SeqCst);
+        mbox.running.store(true, Ordering::SeqCst);
         dispatcher.actor_loop(self_ref.clone()).await;
         mbox.running.store(false, Ordering::SeqCst);
         drop(dispatcher);
         let num_msg = mbox.num_total_message();
         if num_msg > 0 {
-            //println!("num msg = {}", num_msg);
-            //mbox.receive().await;
             mbox.schedule(self_ref.clone());
         }
-        //println!("end receive loop");
-    } else {
-        //println!("lock failed");
     }
 }
 
@@ -100,28 +93,20 @@ impl<T: 'static + Send> Mailbox<T> {
     }
 
     pub(crate) fn schedule(&self, self_ref: ActorRef<T>) {
-        if let Ok(_) =
-            self.running
-                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-        {
-            self.handle.spawn(async move {
-                receive(self_ref.clone()).await
-                //cl.status.store(true, std::sync::atomic::Ordering::SeqCst);
-                //actor_loop( &mut cell ).await;
-            });
-        }
-        // if !self.running.load(Ordering::SeqCst) {
-        //     //println!("schedule");
-        //     //let cl: Mailbox<T> = self.clone();
-
+        // if let Ok(_) =
+        //     self.running
+        //         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        // {
         //     self.handle.spawn(async move {
         //         receive(self_ref.clone()).await
         //         //cl.status.store(true, std::sync::atomic::Ordering::SeqCst);
         //         //actor_loop( &mut cell ).await;
         //     });
-        // } else {
-        //     //println!("not schedule");
         // }
+        if !self.running.load(Ordering::SeqCst) {
+            self.handle
+                .spawn(async move { receive(self_ref.clone()).await });
+        }
     }
 
     pub(crate) fn is_terminated(&self) -> bool {
