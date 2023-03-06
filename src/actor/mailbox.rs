@@ -42,7 +42,7 @@ pub(crate) async fn receive<T: 'static + Send>(self_ref: ActorRef<T>) {
     let mbox = self_ref.mbox.as_ref();
 
     if let Ok(mut dispatcher) = mbox.dispatcher.try_lock() {
-        mbox.running.store(true, Ordering::SeqCst);
+        //mbox.running.store(true, Ordering::SeqCst);
         dispatcher.actor_loop(self_ref.clone()).await;
         drop(dispatcher);
 
@@ -70,7 +70,7 @@ impl<T: 'static + Send> Mailbox<T> {
             actor: None,
             prop: Box::new(pdyn),
             last_message_timestamp: Instant::now(),
-            cell: ActorCell::new(parent),
+            cell: Some(ActorCell::new(parent)),
         };
 
         let mbox = Mailbox {

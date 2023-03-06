@@ -12,6 +12,9 @@ use super::context::ActorCell;
 use super::context::ActorContext;
 use super::Actor;
 use super::ActorRef;
+use super::ChildContainer;
+use super::InternalActorRef;
+use super::ParentRef;
 
 use super::InternalMessage;
 use super::Message;
@@ -38,7 +41,7 @@ pub struct Dispatcher<T: 'static + Send> {
     pub(crate) actor: Option<Box<dyn Actor<Message = T>>>,
     pub(crate) prop: Box<dyn PropDyn<T>>,
     pub(crate) last_message_timestamp: Instant,
-    pub(crate) cell: ActorCell<T>,
+    pub(crate) cell: Option<ActorCell<T>>,
 }
 
 struct PanicError {}
@@ -46,18 +49,18 @@ struct PanicError {}
 impl<T: 'static + Send> Dispatcher<T> {
     fn create_context(&mut self, self_ref: &ActorRef<T>) -> ActorContext<T> {
         //println!("create context");
-        let dc = ActorCell::default();
 
+        let cell = self.cell.take();
         ActorContext {
             self_ref: self_ref.clone(),
             actor: None,
-            cell: replace(&mut self.cell, dc),
+            cell: cell.unwrap(),
         }
     }
 
     fn drop_context(&mut self, self_ref: &ActorRef<T>, context: ActorContext<T>) {
         //println!("drop context");
-        self.cell = context.cell;
+        self.cell = Some(context.cell);
 
         if context.actor.is_some() {
             let old_actor = replace(&mut self.actor, context.actor);
@@ -94,7 +97,10 @@ impl<T: 'static + Send> Dispatcher<T> {
                 //println!("child terminated : {}", msg);
                 let key = msg.key();
 
-                self.cell.childrens.remove(&key);
+                if let Some(cell) = &mut self.cell {
+                    cell.childrens.remove(&key);
+                }
+                //self.cell.childrens.remove(&key);
                 // println!("after children size =  {}", context.childrens.len());
             }
         }
@@ -174,6 +180,19 @@ impl<T: 'static + Send> Dispatcher<T> {
         }
     }
 
+    fn parent_ref(&self) -> Option<&Box<dyn ParentRef>> {
+        self.cell.as_ref().and_then(|x| x.parent.as_ref())
+    }
+
+    fn take_childrens(&mut self) -> HashMap<String, ChildContainer> {
+        if let Some(cell) = &mut self.cell {
+            let child = replace(&mut cell.childrens, Default::default());
+            child
+        } else {
+            Default::default()
+        }
+    }
+
     async fn process_message(&mut self, self_ref: &ActorRef<T>, msg: Message<T>) -> bool {
         self.process_internal_message_all(&self_ref);
 
@@ -187,14 +206,14 @@ impl<T: 'static + Send> Dispatcher<T> {
 
                 self.on_exit(old_actor, self_ref);
 
-                if self.cell.parent.is_some() {
-                    self.cell.parent.as_ref().unwrap().send_internal_message(
-                        InternalMessage::ChildTerminate(self_ref.path.clone()),
-                    )
+                if let Some(parent) = self.parent_ref() {
+                    parent.send_internal_message(InternalMessage::ChildTerminate(
+                        self_ref.path.clone(),
+                    ))
                 }
 
                 {
-                    let childs = replace(&mut self.cell.childrens, Default::default());
+                    let childs = self.take_childrens();
 
                     let mut join_set = JoinSet::new();
 
@@ -237,7 +256,7 @@ impl<T: 'static + Send> Dispatcher<T> {
     fn num_total_message(&self, self_ref: &ActorRef<T>) -> usize {
         self.num_internal_message(self_ref)
             + self_ref.mbox.message_queue.len()
-            + self.cell.unstashed.len()
+            + self.cell.as_ref().map(|x| x.unstashed.len()).unwrap_or(0)
     }
 
     fn pop_internal_message(&self, self_ref: &ActorRef<T>) -> Option<InternalMessage> {
@@ -251,9 +270,12 @@ impl<T: 'static + Send> Dispatcher<T> {
     }
 
     async fn next_message(&mut self, self_ref: &ActorRef<T>) -> Option<Message<T>> {
-        if let Some(msg) = self.cell.unstashed.pop() {
-            return Some(Message::User(msg));
+        if let Some(cell) = &mut self.cell {
+            if let Some(msg) = cell.unstashed.pop() {
+                return Some(Message::User(msg));
+            }
         }
+
         self_ref.mbox.message_queue.pop()
     }
 
