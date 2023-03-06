@@ -2,8 +2,6 @@ use std::{collections::HashMap, sync::Arc};
 
 use std::sync::RwLock;
 
-use tokio::runtime::{Handle, RuntimeFlavor};
-
 use crate::actor::{ChildContainer, ParentRef};
 use crate::ActorError;
 use crate::{

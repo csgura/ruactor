@@ -13,7 +13,6 @@ use super::context::ActorContext;
 use super::Actor;
 use super::ActorRef;
 use super::ChildContainer;
-use super::InternalActorRef;
 use super::ParentRef;
 
 use super::InternalMessage;
