@@ -1,7 +1,7 @@
 use std::ops::Deref;
 use std::{collections::HashMap, sync::Arc};
 
-use std::sync::RwLock;
+use std::sync::{RwLock, Weak};
 
 use tokio::runtime::{Handle, RuntimeFlavor};
 
@@ -138,14 +138,17 @@ impl Drop for UserGuard {
     }
 }
 
-struct RootActorStoper(Arc<UserGuard>);
+struct RootActorStoper(Weak<UserGuard>);
 
 impl ParentRef for RootActorStoper {
     fn send_internal_message(&self, message: crate::actor::InternalMessage) {
         match message {
             crate::actor::InternalMessage::ChildTerminate(path) => {
-                let mut m = self.0.write().unwrap();
-                let _removed = m.remove(&path);
+                let guard = self.0.upgrade();
+                if let Some(guard) = guard {
+                    let mut m = guard.write().unwrap();
+                    let _removed = m.remove(&path);
+                }
             }
         }
     }
@@ -173,7 +176,7 @@ impl ActorSystem {
     ) -> Result<ActorRef<A::Message>, ActorError> {
         log::debug!("Creating actor '{}' on system '{}'...", &path, &self.name);
 
-        let parent = RootActorStoper(self.actors.clone());
+        let parent = RootActorStoper(Arc::downgrade(&self.actors));
 
         let mut actors = self.actors.write().unwrap();
         if actors.contains_key(&path) {
