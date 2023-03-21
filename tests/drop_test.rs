@@ -16,8 +16,8 @@ impl Actor for A1 {
 
     fn on_message(
         &mut self,
-        context: &mut ruactor::ActorContext<Self::Message>,
-        message: Self::Message,
+        _context: &mut ruactor::ActorContext<Self::Message>,
+        _message: Self::Message,
     ) {
         todo!()
     }
@@ -26,7 +26,7 @@ impl Actor for A1 {
 #[tokio::test]
 async fn drop_test() -> Result<(), ActorError> {
     let asys = ActorSystem::new("test");
-    let actor_ref = asys.create_actor("main", props_from_clone(A1 {}))?;
+    let _actor_ref = asys.create_actor("main", props_from_clone(A1 {}))?;
 
     drop(asys);
 

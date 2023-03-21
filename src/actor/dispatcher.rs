@@ -102,6 +102,7 @@ impl<T: 'static + Send> Dispatcher<T> {
                 //self.cell.childrens.remove(&key);
                 // println!("after children size =  {}", context.childrens.len());
             }
+            InternalMessage::Created => {}
         }
     }
 

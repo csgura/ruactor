@@ -8,7 +8,8 @@ use std::{
 use crate::{Actor, Props};
 
 use super::{
-    dispatcher::TimerMessage, ActorRef, ChildContainer, Mailbox, Message, ParentRef, Timer,
+    dispatcher::TimerMessage, ActorRef, ChildContainer, InternalMessage, Mailbox, Message,
+    ParentRef, Timer,
 };
 
 pub struct ActorContext<T: 'static + Send> {
@@ -193,6 +194,8 @@ impl<T: 'static + Send> ActorContext<T> {
                         stop_ref: Box::new(actor_ref.clone()),
                     },
                 );
+                actor_ref.send_internal_message(InternalMessage::Created);
+
                 actor_ref
             }
         }

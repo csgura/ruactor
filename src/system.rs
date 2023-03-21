@@ -5,7 +5,7 @@ use std::sync::{RwLock, Weak};
 
 use tokio::runtime::{Handle, RuntimeFlavor};
 
-use crate::actor::{ChildContainer, ParentRef};
+use crate::actor::{ChildContainer, InternalMessage, ParentRef};
 use crate::ActorError;
 use crate::{
     actor::{Actor, ActorRef, Mailbox},
@@ -150,6 +150,7 @@ impl ParentRef for RootActorStoper {
                     let _removed = m.remove(&path);
                 }
             }
+            crate::actor::InternalMessage::Created => {}
         }
     }
 }
@@ -197,6 +198,8 @@ impl ActorSystem {
                 stop_ref: Box::new(actor_ref.clone()),
             },
         );
+
+        actor_ref.send_internal_message(InternalMessage::Created);
 
         Ok(actor_ref)
     }

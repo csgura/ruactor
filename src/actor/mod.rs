@@ -121,6 +121,7 @@ pub(crate) enum Message<T: 'static + Send> {
 
 #[derive(Debug)]
 pub(crate) enum InternalMessage {
+    Created,
     ChildTerminate(ActorPath),
 }
 
