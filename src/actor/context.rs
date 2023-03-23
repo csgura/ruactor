@@ -107,7 +107,7 @@ impl<T: 'static + Send> ActorContext<T> {
             let s = tokio::time::sleep(d);
             s.await;
 
-            self_ref.send(Message::Timer(name.clone(), gen, t));
+            self_ref.send(Message::Timer(name, gen, t));
         });
     }
 
@@ -151,11 +151,11 @@ impl<T: 'static + Send> ActorContext<T> {
         }
     }
 
-    pub fn get_child<M: 'static + Send>(&self, name: String) -> Option<ActorRef<M>> {
+    pub fn get_child<M: 'static + Send>(&self, name: &str) -> Option<ActorRef<M>> {
         let ret = self
             .cell
             .childrens
-            .get(&name)
+            .get(name)
             .and_then(|any| any.actor_ref.downcast_ref::<ActorRef<M>>().cloned());
 
         ret
@@ -177,11 +177,11 @@ impl<T: 'static + Send> ActorContext<T> {
         name: String,
         prop: P,
     ) -> ActorRef<A::Message> {
-        let ret = self.get_child(name.clone());
+        let ret = self.get_child(&name);
         match ret {
             Some(actor_ref) => actor_ref,
             None => {
-                let cpath = self.self_ref.path.clone() / name.clone();
+                let cpath = self.self_ref.path.as_ref().clone() / name.as_str();
 
                 let mbox = Mailbox::new(prop, Some(Box::new(self.self_ref.clone())));
 

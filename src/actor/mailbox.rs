@@ -100,7 +100,7 @@ impl<T: 'static + Send> Mailbox<T> {
                 .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
         {
             self.handle.spawn(async move {
-                receive(self_ref.clone()).await
+                receive(self_ref).await
                 //cl.status.store(true, std::sync::atomic::Ordering::SeqCst);
                 //actor_loop( &mut cell ).await;
             });

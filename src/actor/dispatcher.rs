@@ -180,8 +180,13 @@ impl<T: 'static + Send> Dispatcher<T> {
         }
     }
 
+    #[allow(dead_code)]
     fn parent_ref(&self) -> Option<&Box<dyn ParentRef>> {
         self.cell.as_ref().and_then(|x| x.parent.as_ref())
+    }
+
+    fn take_parent(&mut self) -> Option<Box<dyn ParentRef>> {
+        self.cell.as_mut().and_then(|x| x.parent.take())
     }
 
     fn take_childrens(&mut self) -> HashMap<String, ChildContainer> {
@@ -206,7 +211,7 @@ impl<T: 'static + Send> Dispatcher<T> {
 
                 self.on_exit(old_actor, self_ref);
 
-                if let Some(parent) = self.parent_ref() {
+                if let Some(parent) = self.take_parent() {
                     parent.send_internal_message(InternalMessage::ChildTerminate(
                         self_ref.path.clone(),
                     ))

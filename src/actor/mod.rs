@@ -24,7 +24,7 @@ pub(crate) trait InternalActorRef: 'static + Send + Sync + Debug {
 
 pub struct ActorRef<T: 'static + Send> {
     mbox: Arc<Mailbox<T>>,
-    path: ActorPath,
+    path: Arc<ActorPath>,
 }
 
 #[async_trait]
@@ -75,7 +75,7 @@ impl<T: 'static + Send> ActorRef<T> {
     pub fn new(path: ActorPath, mbox: Arc<Mailbox<T>>) -> ActorRef<T> {
         ActorRef {
             mbox: mbox,
-            path: path,
+            path: Arc::new(path),
         }
     }
 
@@ -122,7 +122,7 @@ pub(crate) enum Message<T: 'static + Send> {
 #[derive(Debug)]
 pub(crate) enum InternalMessage {
     Created,
-    ChildTerminate(ActorPath),
+    ChildTerminate(Arc<ActorPath>),
 }
 
 #[allow(unused_variables)]
