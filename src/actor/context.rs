@@ -197,6 +197,10 @@ impl<T: 'static + Send> ActorContext<T> {
         }
     }
 
+    pub fn num_children(&self) -> usize {
+        self.cell.childrens.len()
+    }
+
     pub fn stop_self(&mut self) {
         self.self_ref.send(Message::Terminate(None));
     }
