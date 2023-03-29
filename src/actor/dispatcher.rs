@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use std::marker::PhantomData;
 use std::mem::replace;
 use std::panic::AssertUnwindSafe;
 use std::time::Instant;
@@ -19,16 +18,15 @@ use super::InternalMessage;
 use super::Message;
 use crate::system::PropDyn;
 
-pub struct TimerMessage<T: 'static> {
+pub struct TimerMessage {
     pub(crate) gen: u32,
-    pub(crate) phantom: PhantomData<T>,
 }
 
-pub struct Timer<T: 'static> {
-    pub(crate) list: HashMap<String, TimerMessage<T>>,
+pub struct Timer {
+    pub(crate) list: HashMap<String, TimerMessage>,
 }
 
-impl<T: 'static> Default for Timer<T> {
+impl Default for Timer {
     fn default() -> Self {
         Self {
             list: Default::default(),

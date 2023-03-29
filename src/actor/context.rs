@@ -1,6 +1,5 @@
 use std::{
     collections::HashMap,
-    marker::PhantomData,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -22,7 +21,7 @@ pub struct ActorCell<T: 'static + Send> {
     pub(crate) parent: Option<Box<dyn ParentRef>>,
     pub(crate) stash: Vec<T>,
     pub(crate) unstashed: Vec<T>,
-    pub(crate) timer: Timer<T>,
+    pub(crate) timer: Timer,
     pub(crate) childrens: HashMap<String, ChildContainer>,
     pub(crate) receive_timeout: Option<Duration>,
     pub(crate) timer_gen: u32,
@@ -94,13 +93,10 @@ impl<T: 'static + Send> ActorContext<T> {
 
         let gen = self.next_timer_gen();
 
-        self.cell.timer.list.insert(
-            name.clone(),
-            TimerMessage {
-                gen: gen,
-                phantom: PhantomData,
-            },
-        );
+        self.cell
+            .timer
+            .list
+            .insert(name.clone(), TimerMessage { gen: gen });
 
         let self_ref = self.self_ref.clone();
         tokio::spawn(async move {
