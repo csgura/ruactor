@@ -197,7 +197,7 @@ impl<T: 'static + Send> ActorContext<T> {
         }
     }
 
-    pub fn num_children(&self) -> usize {
+    pub fn num_children(&mut self) -> usize {
         self.cell.childrens.len()
     }
 
