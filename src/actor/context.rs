@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     collections::HashMap,
     sync::Arc,
     time::{Duration, Instant},
@@ -87,9 +88,9 @@ impl<T: 'static + Send> ActorContext<T> {
     }
     pub fn start_single_timer<S>(&mut self, name: S, d: Duration, t: T)
     where
-        S: AsRef<str>,
+        S: Into<Cow<'static, str>>,
     {
-        let name = String::from(name.as_ref());
+        let name = name.into();
 
         let gen = self.next_timer_gen();
 
@@ -109,9 +110,9 @@ impl<T: 'static + Send> ActorContext<T> {
 
     pub fn cancel_timer<S>(&mut self, name: S)
     where
-        S: AsRef<str>,
+        S: Into<Cow<'static, str>>,
     {
-        let name = String::from(name.as_ref());
+        let name = name.into();
         self.cell.timer.list.remove(&name);
     }
 

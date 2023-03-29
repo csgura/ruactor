@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 use std::mem::replace;
@@ -23,7 +24,7 @@ pub struct TimerMessage {
 }
 
 pub struct Timer {
-    pub(crate) list: HashMap<String, TimerMessage>,
+    pub(crate) list: HashMap<Cow<'static, str>, TimerMessage>,
 }
 
 impl Default for Timer {

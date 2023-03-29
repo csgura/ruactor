@@ -1,5 +1,6 @@
 use std::{
     any::Any,
+    borrow::Cow,
     fmt::{Debug, Display},
     marker::PhantomData,
     sync::Arc,
@@ -114,7 +115,7 @@ pub enum SystemMessage {
 #[derive(Debug)]
 pub(crate) enum Message<T: 'static + Send> {
     User(T),
-    Timer(String, u32, T),
+    Timer(Cow<'static, str>, u32, T),
     ReceiveTimeout(Instant),
     Terminate(Option<ReplyTo<()>>),
 }

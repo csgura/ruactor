@@ -237,6 +237,7 @@ impl Actor for MainActor {
                 header,
                 body,
             } => {
+                println!("create child actor");
                 let child = context.get_or_create_child(
                     addr.clone(),
                     props_from_clone(ChildActor {
@@ -274,7 +275,7 @@ pub struct Response {
 
 type Header = HashMap<String, Vec<String>>;
 impl Client {
-    pub fn new(asys: ActorSystem) -> Self {
+    pub fn new(asys: &ActorSystem) -> Self {
         let cfg = new_config();
         let actor_ref = asys
             .create_actor("sbigw-main-actor", props_from_clone(MainActor { cfg }))
@@ -308,7 +309,7 @@ impl Client {
 #[tokio::main]
 async fn main() {
     let asys = ActorSystem::new("hello");
-    let cli = Client::new(asys);
+    let cli = Client::new(&asys);
 
     let addr = String::from("hello");
     let num_conn = 23;
@@ -318,7 +319,8 @@ async fn main() {
         num_conn,
     };
 
-    let _ = cli
+    println!("send request");
+    let res = cli
         .send_request(
             "POST".into(),
             "localhost".into(),
@@ -326,6 +328,8 @@ async fn main() {
             Default::default(),
         )
         .await;
+
+    println!("res = {:?}", res);
     loop {
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
