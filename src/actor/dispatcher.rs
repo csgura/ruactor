@@ -74,22 +74,18 @@ impl<T: 'static + Send> Dispatcher<T> {
 
     fn on_exit(&mut self, old_actor: Option<Box<dyn Actor<Message = T>>>, self_ref: &ActorRef<T>) {
         let mut context = self.create_context(self_ref);
-
         if let Some(mut actor) = old_actor {
             actor.on_exit(&mut context);
-
-            self.drop_context(self_ref, context);
         }
+        self.drop_context(self_ref, context);
     }
 
     fn on_enter(&mut self, self_ref: &ActorRef<T>) {
         let mut context = self.create_context(self_ref);
-
         if let Some(actor) = &mut self.actor {
             actor.on_enter(&mut context);
-
-            self.drop_context(self_ref, context);
         }
+        self.drop_context(self_ref, context);
     }
 
     fn on_internal_message(&mut self, _self_ref: &ActorRef<T>, message: InternalMessage) {
