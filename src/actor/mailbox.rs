@@ -158,7 +158,7 @@ impl<T: 'static + Send> Mailbox<T> {
         };
 
         let dedicated_runtime = if dedicated_thread {
-            tokio::runtime::Builder::new_multi_thread()
+            tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
                 .ok()
