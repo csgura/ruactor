@@ -1,10 +1,10 @@
 use std::{
     marker::PhantomData,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc,
     },
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use crossbeam::queue::SegQueue;
@@ -17,9 +17,71 @@ use super::{
     context::ActorCell, ActorRef, Dispatcher, InternalMessage, Message, ParentRef, PropWrap,
 };
 
+pub(crate) struct TokioChannelQueue<T: 'static + Send> {
+    sender: tokio::sync::mpsc::UnboundedSender<Message<T>>,
+    receiver: tokio::sync::mpsc::UnboundedReceiver<Message<T>>,
+    num_msg: Arc<AtomicUsize>,
+}
+
+pub(crate) struct TokioChannelSender<T: 'static + Send> {
+    sender: tokio::sync::mpsc::UnboundedSender<Message<T>>,
+    num_msg: Arc<AtomicUsize>,
+}
+
+impl<T: 'static + Send> TokioChannelSender<T> {
+    pub fn len(&self) -> usize {
+        self.num_msg.load(Ordering::SeqCst)
+    }
+
+    pub fn push(&self, msg: Message<T>) {
+        let _ = self.sender.send(msg);
+        self.num_msg.fetch_add(1, Ordering::SeqCst);
+    }
+}
+impl<T: 'static + Send> TokioChannelQueue<T> {
+    pub fn new() -> Self {
+        let ch = tokio::sync::mpsc::unbounded_channel();
+
+        TokioChannelQueue {
+            sender: ch.0,
+            receiver: ch.1,
+            num_msg: Default::default(),
+        }
+    }
+
+    pub fn sender(&self) -> TokioChannelSender<T> {
+        return TokioChannelSender {
+            sender: self.sender.clone(),
+            num_msg: self.num_msg.clone(),
+        };
+    }
+    #[allow(dead_code)]
+    pub fn len(&self) -> usize {
+        self.num_msg.load(Ordering::SeqCst)
+    }
+
+    #[allow(dead_code)]
+    pub fn push(&self, msg: Message<T>) {
+        let _ = self.sender.send(msg);
+        self.num_msg.fetch_add(1, Ordering::SeqCst);
+    }
+
+    pub async fn pop(&mut self) -> Option<Message<T>> {
+        let ret = tokio::time::timeout(Duration::from_secs(1), self.receiver.recv())
+            .await
+            .unwrap_or(None);
+
+        if ret.is_some() {
+            self.num_msg.fetch_sub(1, Ordering::SeqCst);
+        }
+        ret
+    }
+}
 pub struct Mailbox<T: 'static + Send> {
     pub(crate) internal_queue: SegQueue<InternalMessage>,
-    pub(crate) message_queue: SegQueue<Message<T>>,
+    //pub(crate) message_queue: SegQueue<Message<T>>,
+    pub(crate) message_queue: TokioChannelSender<T>,
+
     pub(crate) running: Arc<AtomicBool>,
     pub(crate) terminated: Arc<AtomicBool>,
     pub(crate) dispatcher: Arc<Mutex<Dispatcher<T>>>,
@@ -84,11 +146,15 @@ impl<T: 'static + Send> Mailbox<T> {
             phantom: PhantomData,
         };
 
+        let message_queue = TokioChannelQueue::new();
+        let message_sender = message_queue.sender();
+
         let dispatcher = Dispatcher {
             actor: None,
             prop: Box::new(pdyn),
             last_message_timestamp: Instant::now(),
             cell: Some(ActorCell::new(parent)),
+            message_queue,
         };
 
         let dedicated_runtime = if dedicated_thread {
@@ -103,7 +169,8 @@ impl<T: 'static + Send> Mailbox<T> {
         let mbox = Mailbox {
             internal_queue: SegQueue::new(),
             dispatcher: Arc::new(Mutex::new(dispatcher)),
-            message_queue: SegQueue::new(),
+            //message_queue: SegQueue::new(),
+            message_queue: message_sender,
             running: Arc::new(false.into()),
             terminated: Arc::new(false.into()),
             handle: handle,

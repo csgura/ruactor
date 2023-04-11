@@ -15,6 +15,7 @@ use super::ActorRef;
 use super::ChildContainer;
 use super::ParentRef;
 
+use super::mailbox::TokioChannelQueue;
 use super::InternalMessage;
 use super::Message;
 use crate::system::PropDyn;
@@ -40,6 +41,7 @@ pub struct Dispatcher<T: 'static + Send> {
     pub(crate) prop: Box<dyn PropDyn<T>>,
     pub(crate) last_message_timestamp: Instant,
     pub(crate) cell: Option<ActorCell<T>>,
+    pub(crate) message_queue: TokioChannelQueue<T>,
 }
 
 struct PanicError {}
@@ -274,14 +276,14 @@ impl<T: 'static + Send> Dispatcher<T> {
         }
     }
 
-    async fn next_message(&mut self, self_ref: &ActorRef<T>) -> Option<Message<T>> {
+    async fn next_message(&mut self, _self_ref: &ActorRef<T>) -> Option<Message<T>> {
         if let Some(cell) = &mut self.cell {
             if let Some(msg) = cell.unstashed.pop() {
                 return Some(Message::User(msg));
             }
         }
 
-        self_ref.mbox.message_queue.pop()
+        self.message_queue.pop().await
     }
 
     pub async fn actor_loop(&mut self, self_ref: ActorRef<T>) {
