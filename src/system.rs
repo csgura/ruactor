@@ -237,6 +237,7 @@ impl ActorSystem {
         }
 
         let mbox = Mailbox::new(
+            path.clone(),
             actor,
             Some(Box::new(parent)),
             self.pool.clone(),

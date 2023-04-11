@@ -11,7 +11,7 @@ use crossbeam::queue::SegQueue;
 use rayon::ThreadPool;
 use tokio::sync::Mutex;
 
-use crate::{Actor, Props};
+use crate::{Actor, ActorPath, Props};
 
 use super::{
     context::ActorCell, ActorRef, Dispatcher, InternalMessage, Message, ParentRef, PropWrap,
@@ -93,11 +93,17 @@ pub struct Mailbox<T: 'static + Send> {
     pub(crate) handle: tokio::runtime::Handle,
     pub(crate) pool: Arc<ThreadPool>,
     pub(crate) dedicated_runtime: Option<tokio::runtime::Runtime>,
+    pub(crate) child_runtime: Option<tokio::runtime::Runtime>,
 }
 
 impl<T: 'static + Send> Drop for Mailbox<T> {
     fn drop(&mut self) {
         let runtime = self.dedicated_runtime.take();
+        if let Some(runtime) = runtime {
+            self.pool.install(move || drop(runtime))
+        }
+
+        let runtime = self.child_runtime.take();
         if let Some(runtime) = runtime {
             self.pool.install(move || drop(runtime))
         }
@@ -136,6 +142,7 @@ pub(crate) async fn receive<T: 'static + Send>(self_ref: ActorRef<T>) {
 
 impl<T: 'static + Send> Mailbox<T> {
     pub(crate) fn new<P, A>(
+        path: ActorPath,
         p: P,
         parent: Option<Box<dyn ParentRef>>,
         pool: Arc<ThreadPool>,
@@ -171,6 +178,27 @@ impl<T: 'static + Send> Mailbox<T> {
             None
         };
 
+        let (child_runtime, actor_handle) = if dedicated_thread {
+            let mut nworker = num_cpus::get() / 4;
+            if nworker == 0 {
+                nworker = num_cpus::get();
+            }
+
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .thread_name(path.to_string())
+                .worker_threads(nworker)
+                .enable_all()
+                .build()
+                .ok();
+            let handle = runtime
+                .as_ref()
+                .map(|x| x.handle().clone())
+                .unwrap_or(handle);
+            (runtime, handle)
+        } else {
+            (None, handle)
+        };
+
         let mbox = Mailbox {
             internal_queue: SegQueue::new(),
             dispatcher: Arc::new(Mutex::new(dispatcher)),
@@ -178,8 +206,9 @@ impl<T: 'static + Send> Mailbox<T> {
             message_queue: message_sender,
             running: Arc::new(false.into()),
             terminated: Arc::new(false.into()),
-            handle: handle,
+            handle: actor_handle,
             dedicated_runtime,
+            child_runtime,
             pool: pool.clone(),
         };
         mbox

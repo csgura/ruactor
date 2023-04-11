@@ -186,6 +186,7 @@ impl<T: 'static + Send> ActorContext<T> {
                 let cpath = self.self_ref.path.as_ref().clone() / name.as_str();
 
                 let mbox = Mailbox::new(
+                    cpath.clone(),
                     prop,
                     Some(Box::new(self.self_ref.clone())),
                     self.self_ref.mbox.pool.clone(),
