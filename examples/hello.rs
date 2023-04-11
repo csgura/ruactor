@@ -102,7 +102,10 @@ async fn main() {
     let system = ActorSystem::new("test");
 
     let actor_ref = system
-        .create_actor("test-actor", props_from_clone(Hello { _counter: 0 }))
+        .create_actor(
+            "test-actor",
+            props_from_clone(Hello { _counter: 0 }).with_dedicated_thread(),
+        )
         .unwrap();
 
     tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
@@ -125,7 +128,7 @@ async fn main() {
     //     Duration::from_secs(10)
     // );
 
-    tokio::time::sleep(tokio::time::Duration::from_secs(1000)).await;
+    tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
 
     // let response_a = actor_ref.ask(msg_a).await.unwrap();
     // assert_eq!(response_a, "Ping!".to_string());

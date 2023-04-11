@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use ruactor::{ask, reply_to, Actor, ActorError, ActorSystem, props_from_clone, ReplyTo};
+use ruactor::{ask, props_from_clone, reply_to, Actor, ActorError, ActorSystem, ReplyTo};
 
 #[derive(Clone)]
 struct IdleState;

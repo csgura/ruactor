@@ -53,6 +53,7 @@ impl<T: 'static + Send> Dispatcher<T> {
             self_ref: self_ref.clone(),
             actor: None,
             cell: cell.unwrap(),
+            handle: self_ref.mbox.handle.clone(),
         }
     }
 
@@ -310,7 +311,9 @@ impl<T: 'static + Send> Dispatcher<T> {
 
             if count >= 100 {
                 count = 0;
-                tokio::task::yield_now().await;
+                if self_ref.mbox.dedicated_runtime.is_none() {
+                    tokio::task::yield_now().await;
+                }
             }
         }
     }

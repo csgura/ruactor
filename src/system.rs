@@ -1,8 +1,10 @@
+use std::marker::PhantomData;
 use std::ops::Deref;
 use std::{collections::HashMap, sync::Arc};
 
 use std::sync::{RwLock, Weak};
 
+use rayon::ThreadPool;
 use tokio::runtime::{Handle, RuntimeFlavor};
 
 use crate::actor::{ChildContainer, InternalMessage, ParentRef};
@@ -16,6 +18,22 @@ use crate::{
 
 pub trait Props<A: Actor>: 'static + Send {
     fn create(&self) -> A;
+    fn dedicated_thread(&self) -> bool;
+}
+
+pub struct DedicatedProp<A: Actor, P: Props<A> + 'static + Send> {
+    props: P,
+    phantom: PhantomData<A>,
+}
+
+impl<A: Actor, P: Props<A> + 'static + Send> Props<A> for DedicatedProp<A, P> {
+    fn create(&self) -> A {
+        self.props.create()
+    }
+
+    fn dedicated_thread(&self) -> bool {
+        true
+    }
 }
 
 pub struct PropFunc<A, F>(pub F)
@@ -23,6 +41,18 @@ where
     A: Actor,
     F: Fn() -> A + 'static + Send;
 
+impl<A, F> PropFunc<A, F>
+where
+    A: Actor,
+    F: Fn() -> A + 'static + Send,
+{
+    pub fn with_dedicated_thread(self) -> impl Props<A> {
+        DedicatedProp {
+            props: self,
+            phantom: PhantomData,
+        }
+    }
+}
 impl<A, F> Props<A> for PropFunc<A, F>
 where
     A: Actor,
@@ -30,6 +60,10 @@ where
 {
     fn create(&self) -> A {
         self.0()
+    }
+
+    fn dedicated_thread(&self) -> bool {
+        false
     }
 }
 
@@ -52,6 +86,22 @@ where
     fn create(&self) -> A {
         self.0.clone()
     }
+
+    fn dedicated_thread(&self) -> bool {
+        false
+    }
+}
+
+impl<A> PropClone<A>
+where
+    A: Actor + Clone,
+{
+    pub fn with_dedicated_thread(self) -> impl Props<A> {
+        DedicatedProp {
+            props: self,
+            phantom: PhantomData,
+        }
+    }
 }
 
 pub fn props_from_clone<A>(a: A) -> PropClone<A>
@@ -63,6 +113,7 @@ where
 
 pub trait PropDyn<T: 'static + Send>: Send + 'static {
     fn create(&self) -> Box<dyn Actor<Message = T>>;
+    fn dedicated_thread(&self) -> bool;
 }
 
 struct UserGuard(RwLock<HashMap<ActorPath, ChildContainer>>);
@@ -79,6 +130,7 @@ impl Deref for UserGuard {
 pub struct ActorSystem {
     name: String,
     actors: Arc<UserGuard>,
+    pool: Arc<ThreadPool>,
 }
 
 impl UserGuard {
@@ -184,7 +236,7 @@ impl ActorSystem {
             return Err(ActorError::Exists(path));
         }
 
-        let mbox = Mailbox::new(actor, Some(Box::new(parent)));
+        let mbox = Mailbox::new(actor, Some(Box::new(parent)), self.pool.clone());
 
         let actor_ref = ActorRef::new(path, Arc::new(mbox));
 
@@ -272,9 +324,16 @@ impl ActorSystem {
     pub fn new(name: &str) -> Self {
         let name = name.to_string();
         let actors = RwLock::new(HashMap::new());
+
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(num_cpus::get())
+            .build()
+            .unwrap();
+
         ActorSystem {
             name,
             actors: Arc::new(UserGuard(actors)),
+            pool: Arc::new(pool),
         }
     }
 }

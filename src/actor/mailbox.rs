@@ -8,6 +8,7 @@ use std::{
 };
 
 use crossbeam::queue::SegQueue;
+use rayon::ThreadPool;
 use tokio::sync::Mutex;
 
 use crate::{Actor, Props};
@@ -23,6 +24,17 @@ pub struct Mailbox<T: 'static + Send> {
     pub(crate) terminated: Arc<AtomicBool>,
     pub(crate) dispatcher: Arc<Mutex<Dispatcher<T>>>,
     pub(crate) handle: tokio::runtime::Handle,
+    pub(crate) pool: Arc<ThreadPool>,
+    pub(crate) dedicated_runtime: Option<tokio::runtime::Runtime>,
+}
+
+impl<T: 'static + Send> Drop for Mailbox<T> {
+    fn drop(&mut self) {
+        let runtime = self.dedicated_runtime.take();
+        if let Some(runtime) = runtime {
+            self.pool.install(move || drop(runtime))
+        }
+    }
 }
 
 // impl<T: 'static + Send> Clone for Mailbox<T> {
@@ -56,11 +68,16 @@ pub(crate) async fn receive<T: 'static + Send>(self_ref: ActorRef<T>) {
 }
 
 impl<T: 'static + Send> Mailbox<T> {
-    pub(crate) fn new<P, A>(p: P, parent: Option<Box<dyn ParentRef>>) -> Mailbox<T>
+    pub(crate) fn new<P, A>(
+        p: P,
+        parent: Option<Box<dyn ParentRef>>,
+        pool: Arc<ThreadPool>,
+    ) -> Mailbox<T>
     where
         P: Props<A>,
         A: Actor<Message = T>,
     {
+        let dedicated_thread = p.dedicated_thread();
         let pdyn = PropWrap {
             prop: p,
             phantom: PhantomData,
@@ -73,6 +90,15 @@ impl<T: 'static + Send> Mailbox<T> {
             cell: Some(ActorCell::new(parent)),
         };
 
+        let dedicated_runtime = if dedicated_thread {
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .ok()
+        } else {
+            None
+        };
+
         let mbox = Mailbox {
             internal_queue: SegQueue::new(),
             dispatcher: Arc::new(Mutex::new(dispatcher)),
@@ -80,6 +106,8 @@ impl<T: 'static + Send> Mailbox<T> {
             running: Arc::new(false.into()),
             terminated: Arc::new(false.into()),
             handle: tokio::runtime::Handle::current(),
+            dedicated_runtime,
+            pool: pool.clone(),
         };
         mbox
     }
@@ -99,16 +127,17 @@ impl<T: 'static + Send> Mailbox<T> {
             self.running
                 .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
         {
-            self.handle.spawn(async move {
-                receive(self_ref).await
-                //cl.status.store(true, std::sync::atomic::Ordering::SeqCst);
-                //actor_loop( &mut cell ).await;
-            });
+            if let Some(runtime) = &self.dedicated_runtime {
+                let handle = runtime.handle().clone();
+
+                self.pool.spawn(move || {
+                    let _guard = handle.enter();
+                    handle.block_on(async move { receive(self_ref).await });
+                })
+            } else {
+                self.handle.spawn(async move { receive(self_ref).await });
+            }
         }
-        // if !self.running.load(Ordering::SeqCst) {
-        //     self.handle
-        //         .spawn(async move { receive(self_ref.clone()).await });
-        // }
     }
 
     pub(crate) fn is_terminated(&self) -> bool {

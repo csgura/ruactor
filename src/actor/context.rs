@@ -16,6 +16,7 @@ pub struct ActorContext<T: 'static + Send> {
     pub(crate) self_ref: ActorRef<T>,
     pub(crate) actor: Option<Box<dyn Actor<Message = T>>>,
     pub(crate) cell: ActorCell<T>,
+    pub(crate) handle: tokio::runtime::Handle,
 }
 
 pub struct ActorCell<T: 'static + Send> {
@@ -68,6 +69,10 @@ fn base64(l: usize, s: String) -> String {
 }
 
 impl<T: 'static + Send> ActorContext<T> {
+    pub fn spawner(&mut self) -> tokio::runtime::Handle {
+        self.handle.clone()
+    }
+
     pub fn self_ref(&mut self) -> ActorRef<T> {
         self.self_ref.clone()
     }
@@ -100,7 +105,7 @@ impl<T: 'static + Send> ActorContext<T> {
             .insert(name.clone(), TimerMessage { gen: gen });
 
         let self_ref = self.self_ref.clone();
-        tokio::spawn(async move {
+        self.handle.spawn(async move {
             let s = tokio::time::sleep(d);
             s.await;
 
@@ -130,7 +135,7 @@ impl<T: 'static + Send> ActorContext<T> {
 
         let tmout = Instant::now() + d;
 
-        tokio::spawn(async move {
+        self.handle.spawn(async move {
             let s = tokio::time::sleep(d);
             s.await;
 
@@ -180,7 +185,11 @@ impl<T: 'static + Send> ActorContext<T> {
             None => {
                 let cpath = self.self_ref.path.as_ref().clone() / name.as_str();
 
-                let mbox = Mailbox::new(prop, Some(Box::new(self.self_ref.clone())));
+                let mbox = Mailbox::new(
+                    prop,
+                    Some(Box::new(self.self_ref.clone())),
+                    self.self_ref.mbox.pool.clone(),
+                );
 
                 let actor_ref = ActorRef::new(cpath, Arc::new(mbox));
 
