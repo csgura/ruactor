@@ -205,6 +205,10 @@ impl<T: 'static + Send> ActorContext<T> {
     pub fn stop_self(&mut self) {
         self.self_ref.send(Message::Terminate(None));
     }
+
+    pub fn num_user_message(&mut self) -> usize {
+        self.self_ref.mbox.num_user_message()
+    }
 }
 
 #[cfg(test)]
