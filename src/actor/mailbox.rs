@@ -158,7 +158,7 @@ impl<T: 'static + Send> Mailbox<T> {
             phantom: PhantomData,
         };
 
-        let message_queue = TokioChannelQueue::new(dedicated_thread);
+        let message_queue = TokioChannelQueue::new(dedicated_thread.is_some());
         let message_sender = message_queue.sender();
 
         let dispatcher = Dispatcher {
@@ -169,20 +169,15 @@ impl<T: 'static + Send> Mailbox<T> {
             message_queue,
         };
 
-        let dedicated_runtime = if dedicated_thread {
+        let dedicated_runtime = dedicated_thread.and_then(|_| {
             tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
                 .ok()
-        } else {
-            None
-        };
+        });
 
-        let (child_runtime, actor_handle) = if dedicated_thread {
-            let mut nworker = num_cpus::get() / 4;
-            if nworker == 0 {
-                nworker = num_cpus::get();
-            }
+        let (child_runtime, actor_handle) = if let Some(nworker) = dedicated_thread {
+            let nworker = std::cmp::max(2, nworker);
 
             let runtime = tokio::runtime::Builder::new_multi_thread()
                 .thread_name(path.to_string())
@@ -207,7 +202,7 @@ impl<T: 'static + Send> Mailbox<T> {
             running: Arc::new(false.into()),
             terminated: Arc::new(false.into()),
             handle: actor_handle,
-            dedicated_runtime,
+            dedicated_runtime: dedicated_runtime,
             child_runtime,
             pool: pool.clone(),
         };

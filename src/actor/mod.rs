@@ -162,7 +162,7 @@ impl<A: Actor, P: Props<A>> PropDyn<A::Message> for PropWrap<A, P> {
     fn create(&self) -> Box<dyn Actor<Message = A::Message>> {
         Box::new(self.prop.create())
     }
-    fn dedicated_thread(&self) -> bool {
+    fn dedicated_thread(&self) -> Option<usize> {
         self.prop.dedicated_thread()
     }
 }

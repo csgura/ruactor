@@ -104,7 +104,7 @@ async fn main() {
     let actor_ref = system
         .create_actor(
             "test-actor",
-            props_from_clone(Hello { _counter: 0 }).with_dedicated_thread(),
+            props_from_clone(Hello { _counter: 0 }).with_dedicated_thread(5),
         )
         .unwrap();
 
