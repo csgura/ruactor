@@ -18,6 +18,7 @@ use super::{
 };
 
 pub(crate) struct TokioChannelQueue<T: 'static + Send> {
+    dedicated: bool,
     sender: tokio::sync::mpsc::UnboundedSender<Message<T>>,
     receiver: tokio::sync::mpsc::UnboundedReceiver<Message<T>>,
     num_msg: Arc<AtomicUsize>,
@@ -39,10 +40,11 @@ impl<T: 'static + Send> TokioChannelSender<T> {
     }
 }
 impl<T: 'static + Send> TokioChannelQueue<T> {
-    pub fn new() -> Self {
+    pub fn new(dedicated: bool) -> Self {
         let ch = tokio::sync::mpsc::unbounded_channel();
 
         TokioChannelQueue {
+            dedicated,
             sender: ch.0,
             receiver: ch.1,
             num_msg: Default::default(),
@@ -67,10 +69,13 @@ impl<T: 'static + Send> TokioChannelQueue<T> {
     }
 
     pub async fn pop(&mut self) -> Option<Message<T>> {
-        let ret = tokio::time::timeout(Duration::from_secs(1), self.receiver.recv())
-            .await
-            .unwrap_or(None);
-
+        let ret = if self.dedicated {
+            self.receiver.try_recv().ok()
+        } else {
+            tokio::time::timeout(Duration::from_secs(1), self.receiver.recv())
+                .await
+                .unwrap_or(None)
+        };
         if ret.is_some() {
             self.num_msg.fetch_sub(1, Ordering::SeqCst);
         }
@@ -146,7 +151,7 @@ impl<T: 'static + Send> Mailbox<T> {
             phantom: PhantomData,
         };
 
-        let message_queue = TokioChannelQueue::new();
+        let message_queue = TokioChannelQueue::new(dedicated_thread);
         let message_sender = message_queue.sender();
 
         let dispatcher = Dispatcher {
@@ -200,7 +205,9 @@ impl<T: 'static + Send> Mailbox<T> {
 
                 self.pool.spawn(move || {
                     let _guard = handle.enter();
-                    handle.block_on(async move { receive(self_ref).await });
+                    handle.block_on(async move {
+                        receive(self_ref).await;
+                    });
                 })
             } else {
                 self.handle.spawn(async move { receive(self_ref).await });
