@@ -236,7 +236,12 @@ impl ActorSystem {
             return Err(ActorError::Exists(path));
         }
 
-        let mbox = Mailbox::new(actor, Some(Box::new(parent)), self.pool.clone());
+        let mbox = Mailbox::new(
+            actor,
+            Some(Box::new(parent)),
+            self.pool.clone(),
+            tokio::runtime::Handle::current(),
+        );
 
         let actor_ref = ActorRef::new(path, Arc::new(mbox));
 

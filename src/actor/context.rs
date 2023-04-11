@@ -189,6 +189,7 @@ impl<T: 'static + Send> ActorContext<T> {
                     prop,
                     Some(Box::new(self.self_ref.clone())),
                     self.self_ref.mbox.pool.clone(),
+                    self.handle.clone(),
                 );
 
                 let actor_ref = ActorRef::new(cpath, Arc::new(mbox));

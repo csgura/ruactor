@@ -72,6 +72,7 @@ impl<T: 'static + Send> Mailbox<T> {
         p: P,
         parent: Option<Box<dyn ParentRef>>,
         pool: Arc<ThreadPool>,
+        handle: tokio::runtime::Handle,
     ) -> Mailbox<T>
     where
         P: Props<A>,
@@ -105,7 +106,7 @@ impl<T: 'static + Send> Mailbox<T> {
             message_queue: SegQueue::new(),
             running: Arc::new(false.into()),
             terminated: Arc::new(false.into()),
-            handle: tokio::runtime::Handle::current(),
+            handle: handle,
             dedicated_runtime,
             pool: pool.clone(),
         };
