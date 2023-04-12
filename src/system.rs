@@ -334,7 +334,9 @@ impl ActorSystem {
         let name = name.to_string();
         let actors = RwLock::new(HashMap::new());
 
+        let thread_name_prefix = name.clone();
         let pool = rayon::ThreadPoolBuilder::new()
+            .thread_name(move |idx| format!("{}-{}", thread_name_prefix, idx))
             .num_threads(num_cpus::get())
             .build()
             .unwrap();
