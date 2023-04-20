@@ -214,7 +214,8 @@ impl<T: 'static + Send> ActorContext<T> {
     }
 
     pub fn stop_self(&mut self) {
-        self.self_ref.send(Message::Terminate(None));
+        self.self_ref
+            .send_internal_message(InternalMessage::Terminate(None));
     }
 
     pub fn num_user_message(&mut self) -> usize {

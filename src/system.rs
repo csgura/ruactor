@@ -206,6 +206,7 @@ impl ParentRef for RootActorStoper {
                 }
             }
             crate::actor::InternalMessage::Created => {}
+            crate::actor::InternalMessage::Terminate(_) => {}
         }
     }
 }

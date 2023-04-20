@@ -46,6 +46,10 @@ pub struct Dispatcher<T: 'static + Send> {
 
 struct PanicError {}
 
+fn pop_internal_message<T: 'static + Send>(self_ref: &ActorRef<T>) -> Option<InternalMessage> {
+    self_ref.mbox.internal_queue.pop()
+}
+
 impl<T: 'static + Send> Dispatcher<T> {
     fn create_context(&mut self, self_ref: &ActorRef<T>) -> ActorContext<T> {
         //println!("create context");
@@ -92,8 +96,43 @@ impl<T: 'static + Send> Dispatcher<T> {
         self.drop_context(self_ref, context);
     }
 
-    fn on_internal_message(&mut self, _self_ref: &ActorRef<T>, message: InternalMessage) {
+    async fn on_internal_message(&mut self, self_ref: &ActorRef<T>, message: InternalMessage) {
         match message {
+            InternalMessage::Terminate(reply_to) => {
+                //println!("stop actor {}", self_ref);
+                self_ref.mbox.close();
+
+                let da = None;
+                let old_actor = replace(&mut self.actor, da);
+
+                self.on_exit(old_actor, self_ref);
+
+                if let Some(parent) = self.take_parent() {
+                    parent.send_internal_message(InternalMessage::ChildTerminate(
+                        self_ref.path.clone(),
+                    ))
+                }
+
+                {
+                    let childs = self.take_childrens();
+
+                    let mut join_set = JoinSet::new();
+
+                    let mut childs = childs.into_iter().collect::<Vec<_>>();
+                    while let Some((_, ch)) = childs.pop() {
+                        join_set.spawn(async move { ch.stop_ref.wait_stop().await });
+                    }
+
+                    while let Some(_) = join_set.join_next().await {}
+                }
+
+                if let Some(sender) = reply_to {
+                    let _ = sender.send(());
+                }
+                //self.cell.childrens.clear();
+
+                //println!("{} stop complete", self_ref);
+            }
             InternalMessage::ChildTerminate(msg) => {
                 //println!("child terminated : {}", msg);
                 let key = msg.key();
@@ -159,11 +198,9 @@ impl<T: 'static + Send> Dispatcher<T> {
                             context.schedule_receive_timeout(tmout);
                         }
                     }
-                }
-
-                Message::Terminate(_) => {
-                    // covered by actor loop
-                }
+                } // Message::Terminate(_) => {
+                  //     // covered by actor loop
+                  // }
             }
         }
     }
@@ -203,46 +240,10 @@ impl<T: 'static + Send> Dispatcher<T> {
     }
 
     async fn process_message(&mut self, self_ref: &ActorRef<T>, msg: Message<T>) -> bool {
-        self.process_internal_message_all(&self_ref);
+        self.process_internal_message_all(&self_ref).await;
 
         match msg {
-            Message::Terminate(reply_to) => {
-                //println!("stop actor {}", self_ref);
-                self_ref.mbox.close();
-
-                let da = None;
-                let old_actor = replace(&mut self.actor, da);
-
-                self.on_exit(old_actor, self_ref);
-
-                if let Some(parent) = self.take_parent() {
-                    parent.send_internal_message(InternalMessage::ChildTerminate(
-                        self_ref.path.clone(),
-                    ))
-                }
-
-                {
-                    let childs = self.take_childrens();
-
-                    let mut join_set = JoinSet::new();
-
-                    let mut childs = childs.into_iter().collect::<Vec<_>>();
-                    while let Some((_, ch)) = childs.pop() {
-                        join_set.spawn(async move { ch.stop_ref.wait_stop().await });
-                    }
-
-                    while let Some(_) = join_set.join_next().await {}
-                }
-
-                if let Some(sender) = reply_to {
-                    let _ = sender.send(());
-                }
-                //self.cell.childrens.clear();
-
-                //println!("{} stop complete", self_ref);
-
-                true
-            }
+            //Message::Terminate(reply_to) => {}
             _ => {
                 let res = self.on_message(self_ref, msg).await;
                 if let Err(_) = res {
@@ -268,17 +269,19 @@ impl<T: 'static + Send> Dispatcher<T> {
             + self.cell.as_ref().map(|x| x.unstashed.len()).unwrap_or(0)
     }
 
-    fn pop_internal_message(&self, self_ref: &ActorRef<T>) -> Option<InternalMessage> {
-        self_ref.mbox.internal_queue.pop()
-    }
-
-    fn process_internal_message_all(&mut self, self_ref: &ActorRef<T>) {
-        while let Some(msg) = self.pop_internal_message(self_ref) {
-            self.on_internal_message(self_ref, msg);
+    async fn process_internal_message_all(&mut self, self_ref: &ActorRef<T>) {
+        while let Some(msg) = pop_internal_message(self_ref) {
+            self.on_internal_message(self_ref, msg).await;
         }
     }
 
-    async fn next_message(&mut self, _self_ref: &ActorRef<T>) -> Option<Message<T>> {
+    async fn next_message(&mut self, self_ref: &ActorRef<T>) -> Option<Message<T>> {
+        self.process_internal_message_all(self_ref).await;
+
+        if self_ref.mbox.is_terminated() {
+            return None;
+        }
+
         if let Some(cell) = &mut self.cell {
             if let Some(msg) = cell.unstashed.pop() {
                 return Some(Message::User(msg));
@@ -303,7 +306,6 @@ impl<T: 'static + Send> Dispatcher<T> {
             return;
         }
 
-        self.process_internal_message_all(&self_ref);
         let mut count = 0;
         while let Some(msg) = self.next_message(&self_ref).await {
             let stop_flag = self.process_message(&self_ref, msg).await;

@@ -31,13 +31,13 @@ pub struct ActorRef<T: 'static + Send> {
 #[async_trait]
 impl<T: 'static + Send> InternalActorRef for ActorRef<T> {
     fn stop(&self) {
-        self.send(Message::Terminate(None));
+        self.send_internal_message(InternalMessage::Terminate(None));
     }
 
     async fn wait_stop(&self) -> Result<(), ActorError> {
         let ch = tokio::sync::oneshot::channel();
 
-        self.send(Message::Terminate(Some(ch.0)));
+        self.send_internal_message(InternalMessage::Terminate(Some(ch.0)));
 
         let ret = ch.1.await?;
         Ok(ret)
@@ -117,13 +117,14 @@ pub(crate) enum Message<T: 'static + Send> {
     User(T),
     Timer(Cow<'static, str>, u32, T),
     ReceiveTimeout(Instant),
-    Terminate(Option<ReplyTo<()>>),
+    //Terminate(Option<ReplyTo<()>>),
 }
 
 #[derive(Debug)]
 pub(crate) enum InternalMessage {
     Created,
     ChildTerminate(Arc<ActorPath>),
+    Terminate(Option<ReplyTo<()>>),
 }
 
 #[allow(unused_variables)]
