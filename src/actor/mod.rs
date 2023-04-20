@@ -44,6 +44,16 @@ impl<T: 'static + Send> InternalActorRef for ActorRef<T> {
     }
 }
 
+pub trait AutoRef {
+    fn send_auto_message(&self, message: AutoMessage);
+}
+
+impl<T: 'static + Send> AutoRef for ActorRef<T> {
+    fn send_auto_message(&self, message: AutoMessage) {
+        self.send(Message::AutoMessage(message))
+    }
+}
+
 pub(crate) trait ParentRef: 'static + Send {
     fn send_internal_message(&self, message: InternalMessage);
 }
@@ -113,11 +123,16 @@ pub enum SystemMessage {
 }
 
 #[derive(Debug)]
+pub enum AutoMessage {
+    PoisonPill,
+}
+
+#[derive(Debug)]
 pub(crate) enum Message<T: 'static + Send> {
     User(T),
     Timer(Cow<'static, str>, u32, T),
     ReceiveTimeout(Instant),
-    //Terminate(Option<ReplyTo<()>>),
+    AutoMessage(AutoMessage),
 }
 
 #[derive(Debug)]

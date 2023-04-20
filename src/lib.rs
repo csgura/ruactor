@@ -5,6 +5,8 @@ mod system;
 pub use actor::Actor;
 pub use actor::ActorContext;
 pub use actor::ActorRef;
+pub use actor::AutoMessage;
+pub use actor::AutoRef;
 pub use actor::SystemMessage;
 pub use path::ActorPath;
 pub use system::ActorSystem;

@@ -12,6 +12,7 @@ use super::context::ActorCell;
 use super::context::ActorContext;
 use super::Actor;
 use super::ActorRef;
+use super::AutoMessage;
 use super::ChildContainer;
 use super::ParentRef;
 
@@ -174,6 +175,7 @@ impl<T: 'static + Send> Dispatcher<T> {
                         actor.on_message_async(context, msg).await;
                     }
                 }
+                Message::AutoMessage(AutoMessage::PoisonPill) => context.stop_self(),
                 Message::ReceiveTimeout(exp) => {
                     let num_msg = self_ref.mbox.num_user_message();
 
