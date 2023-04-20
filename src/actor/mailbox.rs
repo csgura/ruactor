@@ -172,6 +172,7 @@ impl<T: 'static + Send> Mailbox<T> {
             last_message_timestamp: Instant::now(),
             cell: Some(ActorCell::new(parent)),
             message_queue,
+            watcher: Default::default(),
         };
 
         let dedicated_runtime = dedicated_thread.and_then(|_| {
@@ -265,9 +266,7 @@ impl<T: 'static + Send> Mailbox<T> {
     }
 
     pub(crate) fn send_internal(&self, self_ref: ActorRef<T>, msg: InternalMessage) {
-        if !self.is_terminated() {
-            self.internal_queue.push(msg);
-            self.schedule(self_ref);
-        }
+        self.internal_queue.push(msg);
+        self.schedule(self_ref);
     }
 }

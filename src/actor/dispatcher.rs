@@ -20,6 +20,7 @@ use super::mailbox::TokioChannelQueue;
 use super::InternalMessage;
 use super::Message;
 use crate::system::PropDyn;
+use crate::ReplyTo;
 
 pub struct TimerMessage {
     pub(crate) gen: u32,
@@ -43,6 +44,7 @@ pub struct Dispatcher<T: 'static + Send> {
     pub(crate) last_message_timestamp: Instant,
     pub(crate) cell: Option<ActorCell<T>>,
     pub(crate) message_queue: TokioChannelQueue<T>,
+    pub(crate) watcher: Vec<ReplyTo<()>>,
 }
 
 struct PanicError {}
@@ -99,7 +101,14 @@ impl<T: 'static + Send> Dispatcher<T> {
 
     async fn on_internal_message(&mut self, self_ref: &ActorRef<T>, message: InternalMessage) {
         match message {
-            InternalMessage::Terminate(reply_to) => {
+            InternalMessage::Watch(reply_to) => {
+                if self_ref.mbox.is_terminated() {
+                    let _ = reply_to.send(());
+                } else {
+                    self.watcher.push(reply_to);
+                }
+            }
+            InternalMessage::Terminate => {
                 //println!("stop actor {}", self_ref);
                 self_ref.mbox.close();
 
@@ -125,11 +134,13 @@ impl<T: 'static + Send> Dispatcher<T> {
                     }
 
                     while let Some(_) = join_set.join_next().await {}
+
+                    let watcher = replace(&mut self.watcher, Default::default());
+                    watcher.into_iter().for_each(|x| {
+                        let _ = x.send(());
+                    })
                 }
 
-                if let Some(sender) = reply_to {
-                    let _ = sender.send(());
-                }
                 //self.cell.childrens.clear();
 
                 //println!("{} stop complete", self_ref);

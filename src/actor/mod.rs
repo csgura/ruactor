@@ -14,13 +14,15 @@ mod mailbox;
 use crate::{
     path::ActorPath,
     system::{PropDyn, Props},
-    ActorError, ReplyTo,
+    ReplyTo,
 };
 
 #[async_trait]
 pub(crate) trait InternalActorRef: 'static + Send + Sync + Debug {
     fn stop(&self);
-    async fn wait_stop(&self) -> Result<(), ActorError>;
+    async fn graceful_stop(&self);
+    async fn wait_stop(&self);
+    async fn watch(&self);
 }
 
 pub struct ActorRef<T: 'static + Send> {
@@ -31,19 +33,32 @@ pub struct ActorRef<T: 'static + Send> {
 #[async_trait]
 impl<T: 'static + Send> InternalActorRef for ActorRef<T> {
     fn stop(&self) {
-        self.send_internal_message(InternalMessage::Terminate(None));
+        self.send_internal_message(InternalMessage::Terminate);
     }
 
-    async fn wait_stop(&self) -> Result<(), ActorError> {
+    async fn graceful_stop(&self) {
+        self.send_auto_message(AutoMessage::PoisonPill);
+        self.watch().await;
+    }
+
+    async fn wait_stop(&self) {
+        self.stop();
+        self.watch().await;
+    }
+
+    async fn watch(&self) {
+        if self.mbox.is_terminated() {
+            return;
+        }
+
         let ch = tokio::sync::oneshot::channel();
-
-        self.send_internal_message(InternalMessage::Terminate(Some(ch.0)));
-
-        let ret = ch.1.await?;
-        Ok(ret)
+        self.mbox
+            .send_internal(self.clone(), InternalMessage::Watch(ch.0));
+        let _ = ch.1.await;
     }
 }
 
+#[async_trait]
 pub trait AutoRef {
     fn send_auto_message(&self, message: AutoMessage);
 }
@@ -139,7 +154,8 @@ pub(crate) enum Message<T: 'static + Send> {
 pub(crate) enum InternalMessage {
     Created,
     ChildTerminate(Arc<ActorPath>),
-    Terminate(Option<ReplyTo<()>>),
+    Terminate,
+    Watch(ReplyTo<()>),
 }
 
 #[allow(unused_variables)]

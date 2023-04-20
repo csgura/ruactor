@@ -144,7 +144,7 @@ impl UserGuard {
         };
 
         if let Some(actor) = actor {
-            let _ = actor.stop_ref.wait_stop().await;
+            actor.stop_ref.wait_stop().await;
         }
     }
 
@@ -155,7 +155,7 @@ impl UserGuard {
         };
 
         if let Some(actor) = actor {
-            let _ = actor.stop_ref.stop();
+            actor.stop_ref.stop();
         }
     }
 }
@@ -206,7 +206,8 @@ impl ParentRef for RootActorStoper {
                 }
             }
             crate::actor::InternalMessage::Created => {}
-            crate::actor::InternalMessage::Terminate(_) => {}
+            crate::actor::InternalMessage::Terminate => {}
+            crate::actor::InternalMessage::Watch(_) => {}
         }
     }
 }
