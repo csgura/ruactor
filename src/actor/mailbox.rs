@@ -11,7 +11,7 @@ use crossbeam::queue::SegQueue;
 use rayon::ThreadPool;
 use tokio::sync::Mutex;
 
-use crate::{Actor, ActorPath, Props};
+use crate::{Actor, ActorPath, Props, PropsOption};
 
 use super::{
     context::ActorCell, ActorRef, Dispatcher, InternalMessage, Message, ParentRef, PropWrap,
@@ -83,6 +83,7 @@ impl<T: 'static + Send> TokioChannelQueue<T> {
     }
 }
 pub struct Mailbox<T: 'static + Send> {
+    pub(crate) option: PropsOption,
     pub(crate) internal_queue: SegQueue<InternalMessage>,
     //pub(crate) message_queue: SegQueue<Message<T>>,
     pub(crate) message_queue: TokioChannelSender<T>,
@@ -157,7 +158,8 @@ impl<T: 'static + Send> Mailbox<T> {
         P: Props<A>,
         A: Actor<Message = T>,
     {
-        let dedicated_thread = p.dedicated_thread();
+        let option = p.option();
+        let dedicated_thread = option.dedicated_thread();
         let pdyn = PropWrap {
             prop: p,
             phantom: PhantomData,
@@ -201,6 +203,7 @@ impl<T: 'static + Send> Mailbox<T> {
         };
 
         let mbox = Mailbox {
+            option,
             internal_queue: SegQueue::new(),
             dispatcher: Arc::new(Mutex::new(dispatcher)),
             //message_queue: SegQueue::new(),

@@ -16,6 +16,7 @@ pub use system::Props as Prop;
 pub use system::props_from_clone;
 pub use system::props_from_func;
 pub use system::Props;
+pub use system::PropsOption;
 
 #[deprecated]
 pub use system::PropClone;

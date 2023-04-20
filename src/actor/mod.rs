@@ -42,8 +42,12 @@ impl<T: 'static + Send> InternalActorRef for ActorRef<T> {
     }
 
     async fn wait_stop(&self) {
-        self.stop();
-        self.watch().await;
+        if self.mbox.option.graceful_stop() {
+            self.graceful_stop().await;
+        } else {
+            self.stop();
+            self.watch().await;
+        }
     }
 
     async fn watch(&self) {
@@ -194,8 +198,9 @@ impl<A: Actor, P: Props<A>> PropDyn<A::Message> for PropWrap<A, P> {
     fn create(&self) -> Box<dyn Actor<Message = A::Message>> {
         Box::new(self.prop.create())
     }
-    fn dedicated_thread(&self) -> Option<usize> {
-        self.prop.dedicated_thread()
+
+    fn option(&self) -> crate::PropsOption {
+        self.prop.option()
     }
 }
 

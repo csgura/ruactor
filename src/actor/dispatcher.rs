@@ -130,7 +130,10 @@ impl<T: 'static + Send> Dispatcher<T> {
 
                     let mut childs = childs.into_iter().collect::<Vec<_>>();
                     while let Some((_, ch)) = childs.pop() {
-                        join_set.spawn(async move { ch.stop_ref.wait_stop().await });
+                        join_set.spawn_on(
+                            async move { ch.stop_ref.wait_stop().await },
+                            &self_ref.mbox.handle,
+                        );
                     }
 
                     while let Some(_) = join_set.join_next().await {}

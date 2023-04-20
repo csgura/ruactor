@@ -16,24 +16,60 @@ use crate::{
 
 /// Events that this actor system will send
 
-pub trait Props<A: Actor>: 'static + Send {
-    fn create(&self) -> A;
-    fn dedicated_thread(&self) -> Option<usize>;
+#[derive(Clone, Default, Copy)]
+pub struct PropsOption {
+    num_thread: Option<usize>,
+    graceful_stop: bool,
 }
 
-pub struct DedicatedProp<A: Actor, P: Props<A> + 'static + Send> {
+impl PropsOption {
+    pub fn dedicated_thread(&self) -> Option<usize> {
+        self.num_thread
+    }
+
+    pub fn graceful_stop(&self) -> bool {
+        self.graceful_stop
+    }
+}
+
+pub trait Props<A: Actor>: 'static + Send + Sized {
+    fn create(&self) -> A;
+    fn option(&self) -> PropsOption;
+    fn with_dedicated_thread(self, num_thread: usize) -> PropsWithOption<A, Self> {
+        PropsWithOption {
+            option: PropsOption {
+                num_thread: Some(num_thread),
+                ..self.option()
+            },
+            phantom: PhantomData,
+            props: self,
+        }
+    }
+    fn with_graceful_stop(self) -> PropsWithOption<A, Self> {
+        PropsWithOption {
+            option: PropsOption {
+                graceful_stop: true,
+                ..self.option()
+            },
+            phantom: PhantomData,
+            props: self,
+        }
+    }
+}
+
+pub struct PropsWithOption<A: Actor, P: Props<A> + 'static + Send> {
     props: P,
-    num_thread: usize,
+    option: PropsOption,
     phantom: PhantomData<A>,
 }
 
-impl<A: Actor, P: Props<A> + 'static + Send> Props<A> for DedicatedProp<A, P> {
+impl<A: Actor, P: Props<A> + 'static + Send> Props<A> for PropsWithOption<A, P> {
     fn create(&self) -> A {
         self.props.create()
     }
 
-    fn dedicated_thread(&self) -> Option<usize> {
-        Some(self.num_thread)
+    fn option(&self) -> PropsOption {
+        self.option
     }
 }
 
@@ -42,19 +78,6 @@ where
     A: Actor,
     F: Fn() -> A + 'static + Send;
 
-impl<A, F> PropFunc<A, F>
-where
-    A: Actor,
-    F: Fn() -> A + 'static + Send,
-{
-    pub fn with_dedicated_thread(self, num_thread: usize) -> impl Props<A> {
-        DedicatedProp {
-            props: self,
-            num_thread,
-            phantom: PhantomData,
-        }
-    }
-}
 impl<A, F> Props<A> for PropFunc<A, F>
 where
     A: Actor,
@@ -64,8 +87,8 @@ where
         self.0()
     }
 
-    fn dedicated_thread(&self) -> Option<usize> {
-        None
+    fn option(&self) -> PropsOption {
+        return PropsOption::default();
     }
 }
 
@@ -89,21 +112,8 @@ where
         self.0.clone()
     }
 
-    fn dedicated_thread(&self) -> Option<usize> {
-        None
-    }
-}
-
-impl<A> PropClone<A>
-where
-    A: Actor + Clone,
-{
-    pub fn with_dedicated_thread(self, num_thread: usize) -> impl Props<A> {
-        DedicatedProp {
-            props: self,
-            num_thread,
-            phantom: PhantomData,
-        }
+    fn option(&self) -> PropsOption {
+        return PropsOption::default();
     }
 }
 
@@ -116,7 +126,7 @@ where
 
 pub trait PropDyn<T: 'static + Send>: Send + 'static {
     fn create(&self) -> Box<dyn Actor<Message = T>>;
-    fn dedicated_thread(&self) -> Option<usize>;
+    fn option(&self) -> PropsOption;
 }
 
 struct UserGuard(RwLock<HashMap<ActorPath, ChildContainer>>);

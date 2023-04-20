@@ -1,13 +1,13 @@
-use std::time::Duration;
+use std::{thread, time::Duration};
 
-use ruactor::{props_from_clone, Actor, ActorError, ActorRef, ActorSystem, PropClone};
+use ruactor::{props_from_clone, Actor, ActorError, ActorRef, ActorSystem, Prop, PropClone};
 
 #[derive(Clone)]
 struct PPP;
 
 #[allow(dead_code)]
 enum RootMessage {
-    StopSelf,
+    Sleep,
 }
 
 #[derive(Clone)]
@@ -86,7 +86,10 @@ impl Actor for PPP {
         message: Self::Message,
     ) {
         match message {
-            RootMessage::StopSelf => context.stop_self(),
+            RootMessage::Sleep => {
+                println!("sleep 1s");
+                thread::sleep(Duration::from_secs(1));
+            }
         }
     }
 
@@ -99,7 +102,16 @@ impl Actor for PPP {
 //#[tokio::test]
 async fn graceful_stop() -> Result<(), ActorError> {
     let asys = ActorSystem::new("test");
-    let actor_ref = asys.create_actor("main", props_from_clone(PPP))?;
+    let actor_ref = asys.create_actor(
+        "main",
+        props_from_clone(PPP)
+            .with_graceful_stop()
+            .with_dedicated_thread(4),
+    )?;
+
+    actor_ref.tell(RootMessage::Sleep);
+    actor_ref.tell(RootMessage::Sleep);
+    actor_ref.tell(RootMessage::Sleep);
 
     let ar: Option<ActorRef<RootMessage>> = asys.get_actor(actor_ref.path());
 
