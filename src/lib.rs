@@ -10,8 +10,6 @@ pub use actor::AutoRef;
 pub use actor::SystemMessage;
 pub use path::ActorPath;
 pub use system::ActorSystem;
-#[deprecated]
-pub use system::Props as Prop;
 
 pub use system::props_from_clone;
 pub use system::props_from_func;

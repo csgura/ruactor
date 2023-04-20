@@ -1,6 +1,6 @@
 use std::{thread, time::Duration};
 
-use ruactor::{props_from_clone, Actor, ActorError, ActorRef, ActorSystem, Prop, PropClone};
+use ruactor::{props_from_clone, Actor, ActorError, ActorRef, ActorSystem, PropClone, Props};
 
 #[derive(Clone)]
 struct PPP;
@@ -82,7 +82,7 @@ impl Actor for PPP {
     }
     fn on_message(
         &mut self,
-        context: &mut ruactor::ActorContext<Self::Message>,
+        _context: &mut ruactor::ActorContext<Self::Message>,
         message: Self::Message,
     ) {
         match message {
