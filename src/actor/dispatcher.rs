@@ -241,23 +241,15 @@ impl<T: 'static + Send> Dispatcher<T> {
         }
     }
 
-    async fn process_message(&mut self, self_ref: &ActorRef<T>, msg: Message<T>) -> bool {
-        self.process_internal_message_all(&self_ref).await;
+    async fn process_message(&mut self, self_ref: &ActorRef<T>, msg: Message<T>) {
+        let res = self.on_message(self_ref, msg).await;
+        if let Err(_) = res {
+            //println!("panic occurred {:?}", err);
+            let old_actor = self.actor.take();
+            self.on_exit(old_actor, self_ref);
 
-        match msg {
-            //Message::Terminate(reply_to) => {}
-            _ => {
-                let res = self.on_message(self_ref, msg).await;
-                if let Err(_) = res {
-                    //println!("panic occurred {:?}", err);
-                    let old_actor = self.actor.take();
-                    self.on_exit(old_actor, self_ref);
-
-                    self.actor = Some(self.prop.create());
-                    self.on_enter(&self_ref);
-                }
-                false
-            }
+            self.actor = Some(self.prop.create());
+            self.on_enter(&self_ref);
         }
     }
 
@@ -310,10 +302,7 @@ impl<T: 'static + Send> Dispatcher<T> {
 
         let mut count = 0;
         while let Some(msg) = self.next_message(&self_ref).await {
-            let stop_flag = self.process_message(&self_ref, msg).await;
-            if stop_flag {
-                break;
-            }
+            self.process_message(&self_ref, msg).await;
 
             count += 1;
 

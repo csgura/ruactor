@@ -133,9 +133,14 @@ pub(crate) async fn receive<T: 'static + Send>(self_ref: ActorRef<T>) {
 
         mbox.running.store(false, Ordering::SeqCst);
 
-        let num_msg = mbox.num_total_message();
-        if num_msg > 0 {
+        let num_msg = mbox.num_user_message();
+        if num_msg > 0 && !mbox.is_terminated() {
             mbox.schedule(self_ref.clone());
+        } else {
+            let num_sys_msg = mbox.num_internal_message();
+            if num_sys_msg > 0 {
+                mbox.schedule(self_ref.clone());
+            }
         }
     }
 }
@@ -211,6 +216,11 @@ impl<T: 'static + Send> Mailbox<T> {
 
     //#[async_recursion::async_recursion]
 
+    pub(crate) fn num_internal_message(&self) -> usize {
+        self.internal_queue.len()
+    }
+
+    #[allow(dead_code)]
     pub(crate) fn num_total_message(&self) -> usize {
         self.internal_queue.len() + self.message_queue.len()
     }
