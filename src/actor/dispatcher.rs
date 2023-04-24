@@ -314,18 +314,21 @@ impl<T: 'static + Send> Dispatcher<T> {
             return;
         }
 
-        let mut count = 0;
+        //let mut count = 0;
         while let Some(msg) = self.next_message(&self_ref).await {
             self.process_message(&self_ref, msg).await;
 
-            count += 1;
+            // 현재.  recv 할 때  async await 하고 있으니.
+            // 여기서 yield 하는 코드는 필요 없을 듯.
 
-            if count >= 100 {
-                count = 0;
-                if self_ref.mbox.dedicated_runtime.is_none() {
-                    tokio::task::yield_now().await;
-                }
-            }
+            // count += 1;
+
+            // if count >= 100 {
+            //     count = 0;
+            //     if self_ref.mbox.dedicated_runtime.is_none() {
+            //         tokio::task::yield_now().await;
+            //     }
+            // }
         }
     }
 }
