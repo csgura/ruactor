@@ -16,6 +16,7 @@ use super::AutoMessage;
 use super::ChildContainer;
 use super::ParentRef;
 
+use super::mailbox::CrossbeamSegQueue;
 use super::mailbox::TokioChannelQueue;
 use super::InternalMessage;
 use super::Message;
@@ -43,7 +44,7 @@ pub struct Dispatcher<T: 'static + Send> {
     pub(crate) prop: Box<dyn PropDyn<T>>,
     pub(crate) last_message_timestamp: Instant,
     pub(crate) cell: Option<ActorCell<T>>,
-    pub(crate) message_queue: TokioChannelQueue<T>,
+    pub(crate) message_queue: CrossbeamSegQueue<T>,
     pub(crate) watcher: Vec<ReplyTo<()>>,
 }
 
@@ -173,12 +174,16 @@ impl<T: 'static + Send> Dispatcher<T> {
         if let Some(actor) = &mut self.actor {
             match message {
                 Message::User(msg) => {
-                    self.last_message_timestamp = Instant::now();
+                    if context.cell.receive_timeout.is_some() {
+                        self.last_message_timestamp = Instant::now();
+                    }
 
                     actor.on_message_async(context, msg).await;
                 }
                 Message::Timer(key, gen, msg) => {
-                    self.last_message_timestamp = Instant::now();
+                    if context.cell.receive_timeout.is_some() {
+                        self.last_message_timestamp = Instant::now();
+                    }
 
                     let signal = match context.cell.timer.list.get(&key) {
                         Some(info) if info.gen == gen => true,
@@ -214,9 +219,7 @@ impl<T: 'static + Send> Dispatcher<T> {
                             context.schedule_receive_timeout(tmout);
                         }
                     }
-                } // Message::Terminate(_) => {
-                  //     // covered by actor loop
-                  // }
+                }
             }
         }
     }

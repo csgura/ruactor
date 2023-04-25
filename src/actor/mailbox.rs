@@ -24,6 +24,10 @@ pub(crate) struct TokioChannelQueue<T: 'static + Send> {
     num_msg: Arc<AtomicUsize>,
 }
 
+pub(crate) struct CrossbeamSegQueue<T: 'static + Send> {
+    queue: Arc<SegQueue<Message<T>>>,
+}
+
 pub(crate) struct TokioChannelSender<T: 'static + Send> {
     sender: tokio::sync::mpsc::UnboundedSender<Message<T>>,
     num_msg: Arc<AtomicUsize>,
@@ -82,11 +86,40 @@ impl<T: 'static + Send> TokioChannelQueue<T> {
         ret
     }
 }
+
+impl<T: 'static + Send> CrossbeamSegQueue<T> {
+    pub fn new(dedicated: bool) -> Self {
+        CrossbeamSegQueue {
+            queue: Default::default(),
+        }
+    }
+
+    pub fn sender(&self) -> CrossbeamSegQueue<T> {
+        CrossbeamSegQueue {
+            queue: self.queue.clone(),
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn len(&self) -> usize {
+        self.queue.len()
+    }
+
+    #[allow(dead_code)]
+    pub fn push(&self, msg: Message<T>) {
+        self.queue.push(msg)
+    }
+
+    pub async fn pop(&mut self) -> Option<Message<T>> {
+        self.queue.pop()
+    }
+}
+
 pub struct Mailbox<T: 'static + Send> {
     pub(crate) option: PropsOption,
     pub(crate) internal_queue: SegQueue<InternalMessage>,
     //pub(crate) message_queue: SegQueue<Message<T>>,
-    pub(crate) message_queue: TokioChannelSender<T>,
+    pub(crate) message_queue: CrossbeamSegQueue<T>,
 
     pub(crate) running: Arc<AtomicBool>,
     pub(crate) terminated: Arc<AtomicBool>,
@@ -165,7 +198,9 @@ impl<T: 'static + Send> Mailbox<T> {
             phantom: PhantomData,
         };
 
-        let message_queue = TokioChannelQueue::new(dedicated_thread.is_some());
+        //let message_queue = TokioChannelQueue::new(dedicated_thread.is_some());
+        let message_queue = CrossbeamSegQueue::new(dedicated_thread.is_some());
+
         let message_sender = message_queue.sender();
 
         let dispatcher = Dispatcher {
