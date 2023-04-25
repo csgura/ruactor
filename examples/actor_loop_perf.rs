@@ -1,7 +1,7 @@
 use std::time::Instant;
 
 use crossbeam::queue::SegQueue;
-use ruactor::{props_from_clone, Actor, ActorSystem, ReplyTo};
+use ruactor::{props_from_clone, Actor, ActorSystem, Props, ReplyTo};
 
 enum TestMessage {
     Hello(u32),
@@ -56,6 +56,7 @@ async fn main() {
 
     let count = 1000000;
 
+    // push
     let start = Instant::now();
     for _ in 0..count {
         queue.push(TestMessage::Hello(10))
@@ -69,6 +70,7 @@ async fn main() {
         count as f64 / elapsed.as_secs_f64()
     );
 
+    // pop
     let start = Instant::now();
 
     while let Some(mess) = queue.pop() {}
@@ -82,10 +84,12 @@ async fn main() {
     );
 
     let asys = ActorSystem::new("app");
+
     let actor_ref = asys
         .create_actor("test", props_from_clone(TestActor {}))
         .expect("failed");
 
+    // bulk actor loop
     let mut bulk = Vec::new();
 
     for _ in 0..count {
@@ -105,6 +109,7 @@ async fn main() {
         count as f64 / elapsed.as_secs_f64()
     );
 
+    // bulk actor loop wait
     let mut bulk = Vec::new();
     let mut wait = Vec::new();
 
@@ -132,6 +137,11 @@ async fn main() {
         count as f64 / elapsed.as_secs_f64()
     );
 
+    let actor_ref = asys
+        .create_actor("main", props_from_clone(MainActor {}))
+        .expect("failed");
+
+    // main actor wait
     let mut bulk = Vec::new();
     let mut wait = Vec::new();
 
@@ -140,10 +150,6 @@ async fn main() {
         bulk.push(TestMessage::World("hello".into(), ch.0));
         wait.push(ch.1);
     }
-
-    let actor_ref = asys
-        .create_actor("main", props_from_clone(MainActor {}))
-        .expect("failed");
 
     let start = Instant::now();
 
@@ -163,6 +169,7 @@ async fn main() {
         count as f64 / elapsed.as_secs_f64()
     );
 
+    // main actor send/recv
     let mut wait = Vec::new();
 
     let start = Instant::now();
@@ -183,6 +190,38 @@ async fn main() {
 
     println!(
         "actor loop main send/recv : elapsed = {:?}, tps =  {}",
+        elapsed,
+        count as f64 / elapsed.as_secs_f64()
+    );
+
+    // dedicated send/recv
+    let actor_ref = asys
+        .create_actor(
+            "dedi",
+            props_from_clone(MainActor {}).with_dedicated_thread(3),
+        )
+        .expect("failed");
+
+    let mut wait = Vec::new();
+
+    let start = Instant::now();
+
+    for _ in 0..count {
+        let ch = tokio::sync::oneshot::channel();
+        wait.push(ch.1);
+        actor_ref.tell(TestMessage::World("hello".into(), ch.0));
+    }
+
+    for h in wait {
+        let _ = h.await;
+    }
+
+    let end = Instant::now();
+
+    let elapsed = end - start;
+
+    println!(
+        "actor loop dedi send/recv : elapsed = {:?}, tps =  {}",
         elapsed,
         count as f64 / elapsed.as_secs_f64()
     );
