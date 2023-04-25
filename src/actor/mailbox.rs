@@ -115,7 +115,7 @@ impl<T: 'static + Send> CrossbeamSegQueue<T> {
         self.queue.push(msg)
     }
 
-    pub async fn pop(&mut self) -> Option<Message<T>> {
+    pub fn pop(&mut self) -> Option<Message<T>> {
         self.queue.pop()
     }
 }

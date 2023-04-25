@@ -257,6 +257,8 @@ impl<T: 'static + Send> Dispatcher<T> {
         context: &mut ActorContext<T>,
         msg: Message<T>,
     ) {
+        self.process_internal_message_all(self_ref, context).await;
+
         let res = self.on_message(self_ref, context, msg).await;
         if let Err(_) = res {
             //println!("panic occurred {:?}", err);
@@ -288,13 +290,11 @@ impl<T: 'static + Send> Dispatcher<T> {
         }
     }
 
-    async fn next_message(
+    fn next_message(
         &mut self,
         self_ref: &ActorRef<T>,
         context: &mut ActorContext<T>,
     ) -> Option<Message<T>> {
-        self.process_internal_message_all(self_ref, context).await;
-
         if self_ref.mbox.is_terminated() {
             return None;
         }
@@ -303,7 +303,7 @@ impl<T: 'static + Send> Dispatcher<T> {
             return Some(Message::User(msg));
         }
 
-        self.message_queue.pop().await
+        self.message_queue.pop()
     }
 
     pub async fn actor_loop(&mut self, self_ref: ActorRef<T>) {
@@ -330,8 +330,11 @@ impl<T: 'static + Send> Dispatcher<T> {
             return;
         }
 
+        self.process_internal_message_all(&self_ref, &mut context)
+            .await;
+
         // let mut count = 0;
-        while let Some(msg) = self.next_message(&self_ref, &mut context).await {
+        while let Some(msg) = self.next_message(&self_ref, &mut context) {
             self.process_message(&self_ref, &mut context, msg).await;
 
             // 현재.  recv 할 때  async await 하고 있으니.
