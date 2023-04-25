@@ -121,3 +121,11 @@ macro_rules! reply_to {
         }
     }};
 }
+
+pub async fn benchmark_actor_loop<T: 'static + Send>(actor_ref: ActorRef<T>, bulk: Vec<T>) {
+    bulk.into_iter()
+        .for_each(|m| actor_ref.mbox.message_queue.push(actor::Message::User(m)));
+
+    let mut dp = actor_ref.mbox.dispatcher.lock().await;
+    dp.actor_loop(actor_ref.clone()).await;
+}

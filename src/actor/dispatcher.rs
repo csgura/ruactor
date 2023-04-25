@@ -169,7 +169,11 @@ impl<T: 'static + Send> Dispatcher<T> {
         context: &mut ActorContext<T>,
         message: Message<T>,
     ) {
-        let _guard = context.handle.enter();
+        let _guard = if self_ref.mbox.dedicated_runtime.is_some() {
+            Some(context.handle.enter())
+        } else {
+            None
+        };
 
         if let Some(actor) = &mut self.actor {
             match message {

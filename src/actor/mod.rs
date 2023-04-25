@@ -26,8 +26,8 @@ pub(crate) trait InternalActorRef: 'static + Send + Sync + Debug {
 }
 
 pub struct ActorRef<T: 'static + Send> {
-    mbox: Arc<Mailbox<T>>,
-    path: Arc<ActorPath>,
+    pub(crate) mbox: Arc<Mailbox<T>>,
+    pub(crate) path: Arc<ActorPath>,
 }
 
 #[async_trait]
