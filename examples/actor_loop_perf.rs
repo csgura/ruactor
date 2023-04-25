@@ -156,7 +156,7 @@ async fn main() {
     ruactor::benchmark_actor_loop(actor_ref.clone(), bulk).await;
 
     for h in wait {
-        let _ = h.await;
+        let _ = h.await.expect("no answer");
     }
 
     let end = Instant::now();
@@ -181,7 +181,7 @@ async fn main() {
     }
 
     for h in wait {
-        let _ = h.await;
+        let _ = h.await.expect("no answer");
     }
 
     let end = Instant::now();
@@ -213,7 +213,7 @@ async fn main() {
     }
 
     for h in wait {
-        let _ = h.await;
+        let _ = h.await.expect("no answer");
     }
 
     let end = Instant::now();

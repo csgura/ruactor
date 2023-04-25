@@ -62,7 +62,7 @@ impl<T: 'static + Send> Dispatcher<T> {
         ActorContext {
             self_ref: self_ref.clone(),
             actor: None,
-            cell: cell.unwrap(),
+            cell: cell.expect("invalid state."),
             handle: self_ref.mbox.handle.clone(),
         }
     }
@@ -296,9 +296,9 @@ impl<T: 'static + Send> Dispatcher<T> {
     ) -> Option<Message<T>> {
         self.process_internal_message_all(self_ref, context).await;
 
-        // if self_ref.mbox.is_terminated() {
-        //     return None;
-        // }
+        if self_ref.mbox.is_terminated() {
+            return None;
+        }
 
         if let Some(msg) = context.cell.unstashed.pop() {
             return Some(Message::User(msg));
