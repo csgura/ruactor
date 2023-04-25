@@ -38,12 +38,12 @@ pub(crate) struct TokioChannelSender<T: 'static + Send> {
 #[allow(dead_code)]
 impl<T: 'static + Send> TokioChannelSender<T> {
     pub fn len(&self) -> usize {
-        self.num_msg.load(Ordering::SeqCst)
+        self.num_msg.load(Ordering::Acquire)
     }
 
     pub fn push(&self, msg: Message<T>) {
         let _ = self.sender.send(msg);
-        self.num_msg.fetch_add(1, Ordering::SeqCst);
+        self.num_msg.fetch_add(1, Ordering::Release);
     }
 }
 #[allow(dead_code)]
@@ -67,13 +67,13 @@ impl<T: 'static + Send> TokioChannelQueue<T> {
     }
     #[allow(dead_code)]
     pub fn len(&self) -> usize {
-        self.num_msg.load(Ordering::SeqCst)
+        self.num_msg.load(Ordering::Acquire)
     }
 
     #[allow(dead_code)]
     pub fn push(&self, msg: Message<T>) {
         let _ = self.sender.send(msg);
-        self.num_msg.fetch_add(1, Ordering::SeqCst);
+        self.num_msg.fetch_add(1, Ordering::Release);
     }
 
     pub async fn pop(&mut self) -> Option<Message<T>> {
@@ -85,7 +85,7 @@ impl<T: 'static + Send> TokioChannelQueue<T> {
                 .unwrap_or(None)
         };
         if ret.is_some() {
-            self.num_msg.fetch_sub(1, Ordering::SeqCst);
+            self.num_msg.fetch_sub(1, Ordering::Release);
         }
         ret
     }
@@ -166,11 +166,10 @@ pub(crate) async fn receive<T: 'static + Send>(self_ref: ActorRef<T>) {
     let mbox = self_ref.mbox.as_ref();
 
     if let Ok(mut dispatcher) = mbox.dispatcher.try_lock() {
-        //mbox.running.store(true, Ordering::SeqCst);
         dispatcher.actor_loop(self_ref.clone()).await;
         drop(dispatcher);
 
-        mbox.running.store(false, Ordering::SeqCst);
+        mbox.running.store(false, Ordering::Release);
 
         let num_msg = mbox.num_user_message();
         if num_msg > 0 && !mbox.is_terminated() {
@@ -276,7 +275,7 @@ impl<T: 'static + Send> Mailbox<T> {
     pub(crate) fn schedule(&self, self_ref: ActorRef<T>) {
         if let Ok(_) =
             self.running
-                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
         {
             if let Some(runtime) = &self.dedicated_runtime {
                 let handle = runtime.handle().clone();
@@ -294,11 +293,11 @@ impl<T: 'static + Send> Mailbox<T> {
     }
 
     pub(crate) fn is_terminated(&self) -> bool {
-        self.terminated.load(Ordering::SeqCst)
+        self.terminated.load(Ordering::Acquire)
     }
 
     pub(crate) fn close(&self) {
-        self.terminated.store(true, Ordering::SeqCst);
+        self.terminated.store(true, Ordering::Release);
     }
 
     pub(crate) fn send(&self, self_ref: ActorRef<T>, msg: Message<T>) {
