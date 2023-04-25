@@ -277,7 +277,7 @@ impl<T: 'static + Send> Mailbox<T> {
                 let handle = runtime.handle().clone();
 
                 self.pool.spawn(move || {
-                    let _guard = handle.enter();
+                    //let _guard = handle.enter();
                     handle.block_on(async move {
                         receive(self_ref).await;
                     });

@@ -82,7 +82,6 @@ impl<T: 'static + Send> Dispatcher<T> {
 
     fn on_exit(&mut self, old_actor: Option<Box<dyn Actor<Message = T>>>, self_ref: &ActorRef<T>) {
         let mut context = self.create_context(self_ref);
-        let _guard = context.handle.enter();
 
         if let Some(mut actor) = old_actor {
             actor.on_exit(&mut context);
@@ -92,7 +91,6 @@ impl<T: 'static + Send> Dispatcher<T> {
 
     fn on_enter(&mut self, self_ref: &ActorRef<T>) {
         let mut context = self.create_context(self_ref);
-        let _guard = context.handle.enter();
 
         if let Some(actor) = &mut self.actor {
             actor.on_enter(&mut context);
@@ -169,12 +167,6 @@ impl<T: 'static + Send> Dispatcher<T> {
         context: &mut ActorContext<T>,
         message: Message<T>,
     ) {
-        let _guard = if self_ref.mbox.dedicated_runtime.is_some() {
-            Some(context.handle.enter())
-        } else {
-            None
-        };
-
         if let Some(actor) = &mut self.actor {
             match message {
                 Message::User(msg) => {
@@ -307,6 +299,12 @@ impl<T: 'static + Send> Dispatcher<T> {
     }
 
     pub async fn actor_loop(&mut self, self_ref: ActorRef<T>) {
+        let _guard = if self_ref.mbox.dedicated_runtime.is_some() {
+            Some(self_ref.mbox.handle.enter())
+        } else {
+            None
+        };
+
         if self.actor.is_none() {
             self.actor = Some(self.prop.create());
 
