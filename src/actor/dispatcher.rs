@@ -73,8 +73,6 @@ impl<T: 'static + Send> Dispatcher<T> {
     }
 
     fn check_become(&mut self, self_ref: &ActorRef<T>, context: &mut ActorContext<T>) {
-        //println!("drop context");
-
         if context.actor.is_some() {
             let old_actor = replace(&mut self.actor, context.actor.take());
 
@@ -126,14 +124,14 @@ impl<T: 'static + Send> Dispatcher<T> {
 
                 self.on_exit(old_actor, self_ref, context);
 
-                if let Some(parent) = self.take_parent() {
+                if let Some(parent) = self.take_parent(context) {
                     parent.send_internal_message(InternalMessage::ChildTerminate(
                         self_ref.path.clone(),
                     ))
                 }
 
                 {
-                    let childs = self.take_childrens();
+                    let childs = self.take_childrens(context);
 
                     let mut join_set = JoinSet::new();
 
@@ -161,9 +159,8 @@ impl<T: 'static + Send> Dispatcher<T> {
                 //println!("child terminated : {}", msg);
                 let key = msg.key();
 
-                if let Some(cell) = &mut self.cell {
-                    cell.childrens.remove(&key);
-                }
+                context.cell.childrens.remove(&key);
+
                 //self.cell.childrens.remove(&key);
                 // println!("after children size =  {}", context.childrens.len());
             }
@@ -246,22 +243,13 @@ impl<T: 'static + Send> Dispatcher<T> {
         }
     }
 
-    #[allow(dead_code)]
-    fn parent_ref(&self) -> Option<&Box<dyn ParentRef>> {
-        self.cell.as_ref().and_then(|x| x.parent.as_ref())
+    fn take_parent(&mut self, context: &mut ActorContext<T>) -> Option<Box<dyn ParentRef>> {
+        context.cell.parent.take()
     }
 
-    fn take_parent(&mut self) -> Option<Box<dyn ParentRef>> {
-        self.cell.as_mut().and_then(|x| x.parent.take())
-    }
-
-    fn take_childrens(&mut self) -> HashMap<String, ChildContainer> {
-        if let Some(cell) = &mut self.cell {
-            let child = replace(&mut cell.childrens, Default::default());
-            child
-        } else {
-            Default::default()
-        }
+    fn take_childrens(&mut self, context: &mut ActorContext<T>) -> HashMap<String, ChildContainer> {
+        let child = replace(&mut context.cell.childrens, Default::default());
+        child
     }
 
     async fn process_message(
@@ -285,10 +273,10 @@ impl<T: 'static + Send> Dispatcher<T> {
         self_ref.mbox.internal_queue.len()
     }
 
-    fn num_total_message(&self, self_ref: &ActorRef<T>) -> usize {
+    fn num_total_message(&self, self_ref: &ActorRef<T>, context: &mut ActorContext<T>) -> usize {
         self.num_internal_message(self_ref)
             + self_ref.mbox.message_queue.len()
-            + self.cell.as_ref().map(|x| x.unstashed.len()).unwrap_or(0)
+            + context.cell.unstashed.len()
     }
 
     async fn process_internal_message_all(
@@ -308,14 +296,12 @@ impl<T: 'static + Send> Dispatcher<T> {
     ) -> Option<Message<T>> {
         self.process_internal_message_all(self_ref, context).await;
 
-        if self_ref.mbox.is_terminated() {
-            return None;
-        }
+        // if self_ref.mbox.is_terminated() {
+        //     return None;
+        // }
 
-        if let Some(cell) = &mut self.cell {
-            if let Some(msg) = cell.unstashed.pop() {
-                return Some(Message::User(msg));
-            }
+        if let Some(msg) = context.cell.unstashed.pop() {
+            return Some(Message::User(msg));
         }
 
         self.message_queue.pop().await
@@ -340,7 +326,7 @@ impl<T: 'static + Send> Dispatcher<T> {
         // let mut ch = cell.ch;
 
         // let mut stash = cell.stash;
-        if self.num_total_message(&self_ref) == 0 {
+        if self.num_total_message(&self_ref, &mut context) == 0 {
             self.drop_context(&self_ref, context);
             return;
         }
