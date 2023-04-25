@@ -17,6 +17,7 @@ use super::{
     context::ActorCell, ActorRef, Dispatcher, InternalMessage, Message, ParentRef, PropWrap,
 };
 
+#[allow(dead_code)]
 pub(crate) struct TokioChannelQueue<T: 'static + Send> {
     dedicated: bool,
     sender: tokio::sync::mpsc::UnboundedSender<Message<T>>,
@@ -28,11 +29,13 @@ pub(crate) struct CrossbeamSegQueue<T: 'static + Send> {
     queue: Arc<SegQueue<Message<T>>>,
 }
 
+#[allow(dead_code)]
 pub(crate) struct TokioChannelSender<T: 'static + Send> {
     sender: tokio::sync::mpsc::UnboundedSender<Message<T>>,
     num_msg: Arc<AtomicUsize>,
 }
 
+#[allow(dead_code)]
 impl<T: 'static + Send> TokioChannelSender<T> {
     pub fn len(&self) -> usize {
         self.num_msg.load(Ordering::SeqCst)
@@ -43,6 +46,7 @@ impl<T: 'static + Send> TokioChannelSender<T> {
         self.num_msg.fetch_add(1, Ordering::SeqCst);
     }
 }
+#[allow(dead_code)]
 impl<T: 'static + Send> TokioChannelQueue<T> {
     pub fn new(dedicated: bool) -> Self {
         let ch = tokio::sync::mpsc::unbounded_channel();
@@ -88,6 +92,7 @@ impl<T: 'static + Send> TokioChannelQueue<T> {
 }
 
 impl<T: 'static + Send> CrossbeamSegQueue<T> {
+    #[allow(unused_variables)]
     pub fn new(dedicated: bool) -> Self {
         CrossbeamSegQueue {
             queue: Default::default(),

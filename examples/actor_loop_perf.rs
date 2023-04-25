@@ -16,7 +16,7 @@ impl Actor for TestActor {
 
     fn on_message(
         &mut self,
-        context: &mut ruactor::ActorContext<Self::Message>,
+        _context: &mut ruactor::ActorContext<Self::Message>,
         message: Self::Message,
     ) {
         match message {
@@ -73,7 +73,7 @@ async fn main() {
     // pop
     let start = Instant::now();
 
-    while let Some(mess) = queue.pop() {}
+    while let Some(_mess) = queue.pop() {}
     let end = Instant::now();
 
     let elapsed = end - start;

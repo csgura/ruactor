@@ -17,7 +17,6 @@ use super::ChildContainer;
 use super::ParentRef;
 
 use super::mailbox::CrossbeamSegQueue;
-use super::mailbox::TokioChannelQueue;
 use super::InternalMessage;
 use super::Message;
 use crate::system::PropDyn;
@@ -67,7 +66,7 @@ impl<T: 'static + Send> Dispatcher<T> {
         }
     }
 
-    fn drop_context(&mut self, self_ref: &ActorRef<T>, context: ActorContext<T>) {
+    fn drop_context(&mut self, _self_ref: &ActorRef<T>, context: ActorContext<T>) {
         //println!("drop context");
         self.cell = Some(context.cell);
     }
