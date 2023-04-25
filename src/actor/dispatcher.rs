@@ -70,35 +70,45 @@ impl<T: 'static + Send> Dispatcher<T> {
     fn drop_context(&mut self, self_ref: &ActorRef<T>, context: ActorContext<T>) {
         //println!("drop context");
         self.cell = Some(context.cell);
+    }
+
+    fn check_become(&mut self, self_ref: &ActorRef<T>, context: &mut ActorContext<T>) {
+        //println!("drop context");
 
         if context.actor.is_some() {
-            let old_actor = replace(&mut self.actor, context.actor);
+            let old_actor = replace(&mut self.actor, context.actor.take());
 
-            self.on_exit(old_actor, self_ref);
+            self.on_exit(old_actor, self_ref, context);
 
-            self.on_enter(self_ref);
+            self.on_enter(self_ref, context);
         }
     }
 
-    fn on_exit(&mut self, old_actor: Option<Box<dyn Actor<Message = T>>>, self_ref: &ActorRef<T>) {
-        let mut context = self.create_context(self_ref);
-
+    fn on_exit(
+        &mut self,
+        old_actor: Option<Box<dyn Actor<Message = T>>>,
+        self_ref: &ActorRef<T>,
+        context: &mut ActorContext<T>,
+    ) {
         if let Some(mut actor) = old_actor {
-            actor.on_exit(&mut context);
+            actor.on_exit(context);
+            self.check_become(self_ref, context);
         }
-        self.drop_context(self_ref, context);
     }
 
-    fn on_enter(&mut self, self_ref: &ActorRef<T>) {
-        let mut context = self.create_context(self_ref);
-
+    fn on_enter(&mut self, self_ref: &ActorRef<T>, context: &mut ActorContext<T>) {
         if let Some(actor) = &mut self.actor {
-            actor.on_enter(&mut context);
+            actor.on_enter(context);
+            self.check_become(self_ref, context);
         }
-        self.drop_context(self_ref, context);
     }
 
-    async fn on_internal_message(&mut self, self_ref: &ActorRef<T>, message: InternalMessage) {
+    async fn on_internal_message(
+        &mut self,
+        self_ref: &ActorRef<T>,
+        context: &mut ActorContext<T>,
+        message: InternalMessage,
+    ) {
         match message {
             InternalMessage::Watch(reply_to) => {
                 if self_ref.mbox.is_terminated() {
@@ -114,7 +124,7 @@ impl<T: 'static + Send> Dispatcher<T> {
                 let da = None;
                 let old_actor = replace(&mut self.actor, da);
 
-                self.on_exit(old_actor, self_ref);
+                self.on_exit(old_actor, self_ref, context);
 
                 if let Some(parent) = self.take_parent() {
                     parent.send_internal_message(InternalMessage::ChildTerminate(
@@ -222,13 +232,13 @@ impl<T: 'static + Send> Dispatcher<T> {
     async fn on_message(
         &mut self,
         self_ref: &ActorRef<T>,
+        context: &mut ActorContext<T>,
         message: Message<T>,
     ) -> Result<(), PanicError> {
-        let mut context = self.create_context(self_ref);
-        let res = AssertUnwindSafe(self.on_message_in_context(self_ref, &mut context, message))
+        let res = AssertUnwindSafe(self.on_message_in_context(self_ref, context, message))
             .catch_unwind()
             .await;
-        self.drop_context(self_ref, context);
+        self.check_become(self_ref, context);
 
         match res {
             Ok(_) => Ok(()),
@@ -254,15 +264,20 @@ impl<T: 'static + Send> Dispatcher<T> {
         }
     }
 
-    async fn process_message(&mut self, self_ref: &ActorRef<T>, msg: Message<T>) {
-        let res = self.on_message(self_ref, msg).await;
+    async fn process_message(
+        &mut self,
+        self_ref: &ActorRef<T>,
+        context: &mut ActorContext<T>,
+        msg: Message<T>,
+    ) {
+        let res = self.on_message(self_ref, context, msg).await;
         if let Err(_) = res {
             //println!("panic occurred {:?}", err);
             let old_actor = self.actor.take();
-            self.on_exit(old_actor, self_ref);
+            self.on_exit(old_actor, self_ref, context);
 
             self.actor = Some(self.prop.create());
-            self.on_enter(&self_ref);
+            self.on_enter(&self_ref, context);
         }
     }
 
@@ -276,14 +291,22 @@ impl<T: 'static + Send> Dispatcher<T> {
             + self.cell.as_ref().map(|x| x.unstashed.len()).unwrap_or(0)
     }
 
-    async fn process_internal_message_all(&mut self, self_ref: &ActorRef<T>) {
+    async fn process_internal_message_all(
+        &mut self,
+        self_ref: &ActorRef<T>,
+        context: &mut ActorContext<T>,
+    ) {
         while let Some(msg) = pop_internal_message(self_ref) {
-            self.on_internal_message(self_ref, msg).await;
+            self.on_internal_message(self_ref, context, msg).await;
         }
     }
 
-    async fn next_message(&mut self, self_ref: &ActorRef<T>) -> Option<Message<T>> {
-        self.process_internal_message_all(self_ref).await;
+    async fn next_message(
+        &mut self,
+        self_ref: &ActorRef<T>,
+        context: &mut ActorContext<T>,
+    ) -> Option<Message<T>> {
+        self.process_internal_message_all(self_ref, context).await;
 
         if self_ref.mbox.is_terminated() {
             return None;
@@ -305,10 +328,12 @@ impl<T: 'static + Send> Dispatcher<T> {
             None
         };
 
+        let mut context = self.create_context(&self_ref);
+
         if self.actor.is_none() {
             self.actor = Some(self.prop.create());
 
-            self.on_enter(&self_ref);
+            self.on_enter(&self_ref, &mut context);
         }
 
         // let mut actor = cell.actor;
@@ -316,12 +341,13 @@ impl<T: 'static + Send> Dispatcher<T> {
 
         // let mut stash = cell.stash;
         if self.num_total_message(&self_ref) == 0 {
+            self.drop_context(&self_ref, context);
             return;
         }
 
-        //let mut count = 0;
-        while let Some(msg) = self.next_message(&self_ref).await {
-            self.process_message(&self_ref, msg).await;
+        // let mut count = 0;
+        while let Some(msg) = self.next_message(&self_ref, &mut context).await {
+            self.process_message(&self_ref, &mut context, msg).await;
 
             // 현재.  recv 할 때  async await 하고 있으니.
             // 여기서 yield 하는 코드는 필요 없을 듯.
@@ -335,5 +361,6 @@ impl<T: 'static + Send> Dispatcher<T> {
             //     }
             // }
         }
+        self.drop_context(&self_ref, context);
     }
 }
