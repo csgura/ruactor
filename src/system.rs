@@ -16,10 +16,21 @@ use crate::{
 
 /// Events that this actor system will send
 
-#[derive(Clone, Default, Copy)]
+#[derive(Clone, Copy)]
 pub struct PropsOption {
     num_thread: Option<usize>,
     graceful_stop: bool,
+    throughput: usize,
+}
+
+impl Default for PropsOption {
+    fn default() -> Self {
+        Self {
+            num_thread: Default::default(),
+            graceful_stop: Default::default(),
+            throughput: 500,
+        }
+    }
 }
 
 impl PropsOption {
@@ -29,6 +40,10 @@ impl PropsOption {
 
     pub fn graceful_stop(&self) -> bool {
         self.graceful_stop
+    }
+
+    pub fn throughput(&self) -> usize {
+        self.throughput
     }
 }
 
@@ -49,6 +64,16 @@ pub trait Props<A: Actor>: 'static + Send + Sized {
         PropsWithOption {
             option: PropsOption {
                 graceful_stop: true,
+                ..self.option()
+            },
+            phantom: PhantomData,
+            props: self,
+        }
+    }
+    fn with_throughput(self, throughput: usize) -> PropsWithOption<A, Self> {
+        PropsWithOption {
+            option: PropsOption {
+                throughput,
                 ..self.option()
             },
             phantom: PhantomData,

@@ -41,8 +41,10 @@ impl Actor for MainActor {
     ) {
         match message {
             TestMessage::World(str, reply_to) => {
-                let child =
-                    context.get_or_create_child(str.clone(), props_from_clone(TestActor {}));
+                let child = context.get_or_create_child(
+                    str.clone(),
+                    props_from_clone(TestActor {}).with_throughput(2000000),
+                );
                 child.tell(TestMessage::World(str, reply_to));
             }
             _ => {}
