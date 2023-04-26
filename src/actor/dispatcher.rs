@@ -6,16 +6,15 @@ use std::panic::AssertUnwindSafe;
 use std::time::Instant;
 
 use futures::FutureExt;
-use tokio::task::JoinSet;
 
 use super::context::ActorCell;
 use super::context::ActorContext;
 use super::Actor;
 use super::ActorRef;
 use super::AutoMessage;
-use super::ChildContainer;
 use super::ParentRef;
 
+use super::context::SuspendReason;
 use super::mailbox::CrossbeamSegQueue;
 use super::InternalMessage;
 use super::Message;
@@ -100,7 +99,23 @@ impl<T: 'static + Send> Dispatcher<T> {
         }
     }
 
-    async fn on_internal_message(
+    fn terminate(&mut self, self_ref: &ActorRef<T>, context: &mut ActorContext<T>) {
+        let da = None;
+        let old_actor = replace(&mut self.actor, da);
+
+        self.on_exit(old_actor, self_ref, context);
+
+        // println!("actor {} send teminated", self_ref);
+        if let Some(parent) = self.take_parent(context) {
+            parent.send_internal_message(InternalMessage::ChildTerminate(self_ref.path.clone()))
+        }
+
+        let watcher = replace(&mut self.watcher, Default::default());
+        watcher.into_iter().for_each(|x| {
+            let _ = x.send(());
+        })
+    }
+    fn on_internal_message(
         &mut self,
         self_ref: &ActorRef<T>,
         context: &mut ActorContext<T>,
@@ -118,36 +133,31 @@ impl<T: 'static + Send> Dispatcher<T> {
                 //println!("stop actor {}", self_ref);
                 self_ref.mbox.close();
 
-                let da = None;
-                let old_actor = replace(&mut self.actor, da);
-
-                self.on_exit(old_actor, self_ref, context);
-
-                if let Some(parent) = self.take_parent(context) {
-                    parent.send_internal_message(InternalMessage::ChildTerminate(
-                        self_ref.path.clone(),
-                    ))
-                }
-
                 {
-                    let childs = self.take_childrens(context);
+                    if context.cell.childrens.len() > 0 {
+                        context.cell.suspend_reason = Some(SuspendReason::ChildrenTermination);
 
-                    let mut join_set = JoinSet::new();
-
-                    let mut childs = childs.into_iter().collect::<Vec<_>>();
-                    while let Some((_, ch)) = childs.pop() {
-                        join_set.spawn_on(
-                            async move { ch.stop_ref.wait_stop().await },
-                            &self_ref.mbox.handle,
-                        );
+                        context.cell.childrens.iter().for_each(|c| {
+                            //println!("{} send stop to {:?}", self_ref, c.1.stop_ref);
+                            c.1.stop_ref.stop();
+                        });
+                    } else {
+                        self.terminate(self_ref, context);
                     }
 
-                    while let Some(_) = join_set.join_next().await {}
+                    // let childs = self.take_childrens(context);
 
-                    let watcher = replace(&mut self.watcher, Default::default());
-                    watcher.into_iter().for_each(|x| {
-                        let _ = x.send(());
-                    })
+                    // let mut join_set = JoinSet::new();
+
+                    // let mut childs = childs.into_iter().collect::<Vec<_>>();
+                    // while let Some((_, ch)) = childs.pop() {
+                    //     join_set.spawn_on(
+                    //         async move { ch.stop_ref.wait_stop().await },
+                    //         &self_ref.mbox.handle,
+                    //     );
+                    // }
+
+                    // while let Some(_) = join_set.join_next().await {}
                 }
 
                 //self.cell.childrens.clear();
@@ -158,7 +168,34 @@ impl<T: 'static + Send> Dispatcher<T> {
                 //println!("child terminated : {}", msg);
                 let key = msg.key();
 
+                // println!(
+                //     "before delete num children of {} = {}",
+                //     self_ref,
+                //     context.cell.childrens.len()
+                // );
+
                 context.cell.childrens.remove(&key);
+
+                // println!(
+                //     "num children of {} = {}",
+                //     self_ref,
+                //     context.cell.childrens.len()
+                // );
+
+                // let clist = context
+                //     .cell
+                //     .childrens
+                //     .iter()
+                //     .map(|c| c.0.as_str())
+                //     .collect::<Vec<_>>()
+                //     .join(",");
+                // println!("{}'s childrens = {}", self_ref, clist);
+
+                if context.cell.suspend_reason.is_some() && context.cell.childrens.len() == 0 {
+                    // println!("all children terminated");
+                    context.cell.suspend_reason = None;
+                    self.terminate(self_ref, context);
+                }
 
                 //self.cell.childrens.remove(&key);
                 // println!("after children size =  {}", context.childrens.len());
@@ -246,10 +283,10 @@ impl<T: 'static + Send> Dispatcher<T> {
         context.cell.parent.take()
     }
 
-    fn take_childrens(&mut self, context: &mut ActorContext<T>) -> HashMap<String, ChildContainer> {
-        let child = replace(&mut context.cell.childrens, Default::default());
-        child
-    }
+    // fn take_childrens(&mut self, context: &mut ActorContext<T>) -> HashMap<String, ChildContainer> {
+    //     let child = replace(&mut context.cell.childrens, Default::default());
+    //     child
+    // }
 
     async fn process_message(
         &mut self,
@@ -257,7 +294,7 @@ impl<T: 'static + Send> Dispatcher<T> {
         context: &mut ActorContext<T>,
         msg: Message<T>,
     ) {
-        self.process_internal_message_all(self_ref, context).await;
+        self.process_internal_message_all(self_ref, context);
 
         let res = self.on_message(self_ref, context, msg).await;
         if let Err(_) = res {
@@ -270,23 +307,25 @@ impl<T: 'static + Send> Dispatcher<T> {
         }
     }
 
+    #[allow(dead_code)]
     fn num_internal_message(&self, self_ref: &ActorRef<T>) -> usize {
         self_ref.mbox.internal_queue.len()
     }
 
+    #[allow(dead_code)]
     fn num_total_message(&self, self_ref: &ActorRef<T>, context: &mut ActorContext<T>) -> usize {
         self.num_internal_message(self_ref)
             + self_ref.mbox.message_queue.len()
             + context.cell.unstashed.len()
     }
 
-    async fn process_internal_message_all(
+    fn process_internal_message_all(
         &mut self,
         self_ref: &ActorRef<T>,
         context: &mut ActorContext<T>,
     ) {
         while let Some(msg) = pop_internal_message(self_ref) {
-            self.on_internal_message(self_ref, context, msg).await;
+            self.on_internal_message(self_ref, context, msg);
         }
     }
 
@@ -325,13 +364,12 @@ impl<T: 'static + Send> Dispatcher<T> {
         // let mut ch = cell.ch;
 
         // let mut stash = cell.stash;
-        if self.num_total_message(&self_ref, &mut context) == 0 {
-            self.drop_context(&self_ref, context);
-            return;
-        }
+        // if self.num_total_message(&self_ref, &mut context) == 0 {
+        //     self.drop_context(&self_ref, context);
+        //     return;
+        // }
 
-        self.process_internal_message_all(&self_ref, &mut context)
-            .await;
+        self.process_internal_message_all(&self_ref, &mut context);
 
         // let mut count = 0;
         while let Some(msg) = self.next_message(&self_ref, &mut context) {

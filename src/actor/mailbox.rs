@@ -139,12 +139,16 @@ impl<T: 'static + Send> Drop for Mailbox<T> {
     fn drop(&mut self) {
         let runtime = self.dedicated_runtime.take();
         if let Some(runtime) = runtime {
-            self.pool.install(move || drop(runtime))
+            self.pool.install(move || {
+                drop(runtime);
+            })
         }
 
         let runtime = self.child_runtime.take();
         if let Some(runtime) = runtime {
-            self.pool.install(move || drop(runtime))
+            self.pool.install(move || {
+                drop(runtime);
+            })
         }
     }
 }
@@ -281,9 +285,10 @@ impl<T: 'static + Send> Mailbox<T> {
                 let handle = runtime.handle().clone();
 
                 self.pool.spawn(move || {
+                    let sc = self_ref.clone();
                     //let _guard = handle.enter();
                     handle.block_on(async move {
-                        receive(self_ref).await;
+                        receive(sc).await;
                     });
                 })
             } else {

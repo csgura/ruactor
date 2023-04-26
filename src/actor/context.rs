@@ -19,6 +19,10 @@ pub struct ActorContext<T: 'static + Send> {
     pub(crate) handle: tokio::runtime::Handle,
 }
 
+pub(crate) enum SuspendReason {
+    ChildrenTermination,
+}
+
 pub struct ActorCell<T: 'static + Send> {
     pub(crate) parent: Option<Box<dyn ParentRef>>,
     pub(crate) stash: Vec<T>,
@@ -28,6 +32,7 @@ pub struct ActorCell<T: 'static + Send> {
     pub(crate) receive_timeout: Option<Duration>,
     pub(crate) timer_gen: u32,
     pub(crate) next_name_offset: usize,
+    pub(crate) suspend_reason: Option<SuspendReason>,
 }
 
 impl<T: 'static + Send> Default for ActorCell<T> {
@@ -41,6 +46,7 @@ impl<T: 'static + Send> Default for ActorCell<T> {
             receive_timeout: Default::default(),
             timer_gen: Default::default(),
             next_name_offset: 0,
+            suspend_reason: None,
         }
     }
 }
@@ -183,6 +189,7 @@ impl<T: 'static + Send> ActorContext<T> {
         match ret {
             Some(actor_ref) => actor_ref,
             None => {
+                //println!("actor {} crate child {}", self.self_ref, name);
                 let cpath = self.self_ref.path.as_ref().clone() / name.as_str();
 
                 let mbox = Mailbox::new(
