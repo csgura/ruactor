@@ -1,7 +1,8 @@
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crossbeam::queue::SegQueue;
-use ruactor::{props_from_clone, Actor, ActorSystem, Props, ReplyTo};
+use ruactor::{ask, props_from_clone, Actor, ActorSystem, Props, ReplyTo};
+use tokio::task::JoinSet;
 
 enum TestMessage {
     Hello(u32),
@@ -272,5 +273,35 @@ async fn main() {
         "actor loop dedi bounded send/recv : elapsed = {:?}, tps =  {}",
         elapsed,
         count as f64 / elapsed.as_secs_f64()
+    );
+
+    let start = Instant::now();
+
+    let mut js = JoinSet::new();
+    let num_cli = 100;
+    let count = 10000;
+    for _ in 0..num_cli {
+        let ac = actor_ref.clone();
+        js.spawn(async move {
+            for _ in 0..count {
+                let _ = ask!(
+                    ac,
+                    TestMessage::World("hello".into(), _),
+                    Duration::from_secs(5)
+                );
+            }
+        });
+    }
+
+    while let Some(_) = js.join_next().await {}
+
+    let end = Instant::now();
+
+    let elapsed = end - start;
+
+    println!(
+        "actor ask dedi bounded send/recv : elapsed = {:?}, tps =  {}",
+        elapsed,
+        num_cli as f64 * count as f64 / elapsed.as_secs_f64()
     );
 }
