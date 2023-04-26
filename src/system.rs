@@ -21,6 +21,7 @@ pub struct PropsOption {
     num_thread: Option<usize>,
     graceful_stop: bool,
     throughput: usize,
+    bounded: Option<usize>,
 }
 
 impl Default for PropsOption {
@@ -29,6 +30,7 @@ impl Default for PropsOption {
             num_thread: Default::default(),
             graceful_stop: Default::default(),
             throughput: 500,
+            bounded: None,
         }
     }
 }
@@ -44,6 +46,10 @@ impl PropsOption {
 
     pub fn throughput(&self) -> usize {
         self.throughput
+    }
+
+    pub fn bounded(&self) -> Option<usize> {
+        self.bounded
     }
 }
 
@@ -74,6 +80,17 @@ pub trait Props<A: Actor>: 'static + Send + Sized {
         PropsWithOption {
             option: PropsOption {
                 throughput,
+                ..self.option()
+            },
+            phantom: PhantomData,
+            props: self,
+        }
+    }
+
+    fn with_bounded_queue(self, size: usize) -> PropsWithOption<A, Self> {
+        PropsWithOption {
+            option: PropsOption {
+                bounded: Some(size),
                 ..self.option()
             },
             phantom: PhantomData,

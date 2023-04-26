@@ -7,7 +7,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crossbeam::queue::SegQueue;
+use crossbeam::queue::{ArrayQueue, SegQueue};
 use rayon::ThreadPool;
 use tokio::sync::Mutex;
 
@@ -25,8 +25,14 @@ pub(crate) struct TokioChannelQueue<T: 'static + Send> {
     num_msg: Arc<AtomicUsize>,
 }
 
+#[derive(Clone)]
+enum Either<L: Clone, R: Clone> {
+    Left(L),
+    Right(R),
+}
+
 pub(crate) struct CrossbeamSegQueue<T: 'static + Send> {
-    queue: Arc<SegQueue<Message<T>>>,
+    queue: Either<Arc<SegQueue<Message<T>>>, Arc<ArrayQueue<Message<T>>>>,
 }
 
 #[allow(dead_code)]
@@ -93,9 +99,16 @@ impl<T: 'static + Send> TokioChannelQueue<T> {
 
 impl<T: 'static + Send> CrossbeamSegQueue<T> {
     #[allow(unused_variables)]
-    pub fn new(dedicated: bool) -> Self {
+    pub fn unbounded(dedicated: bool) -> Self {
         CrossbeamSegQueue {
-            queue: Default::default(),
+            queue: Either::Left(Default::default()),
+        }
+    }
+
+    #[allow(unused_variables)]
+    pub fn bounded(dedicated: bool, size: usize) -> Self {
+        CrossbeamSegQueue {
+            queue: Either::Right(Arc::new(ArrayQueue::new(size))),
         }
     }
 
@@ -107,16 +120,28 @@ impl<T: 'static + Send> CrossbeamSegQueue<T> {
 
     #[allow(dead_code)]
     pub fn len(&self) -> usize {
-        self.queue.len()
+        match &self.queue {
+            Either::Left(l) => l.len(),
+            Either::Right(r) => r.len(),
+        }
     }
 
     #[allow(dead_code)]
-    pub fn push(&self, msg: Message<T>) {
-        self.queue.push(msg)
+    pub fn push(&self, msg: Message<T>) -> Result<(), Message<T>> {
+        match &self.queue {
+            Either::Left(l) => {
+                l.push(msg);
+                Ok(())
+            }
+            Either::Right(r) => r.push(msg),
+        }
     }
 
     pub fn pop(&mut self) -> Option<Message<T>> {
-        self.queue.pop()
+        match &self.queue {
+            Either::Left(l) => l.pop(),
+            Either::Right(r) => r.pop(),
+        }
     }
 }
 
@@ -207,7 +232,11 @@ impl<T: 'static + Send> Mailbox<T> {
         };
 
         //let message_queue = TokioChannelQueue::new(dedicated_thread.is_some());
-        let message_queue = CrossbeamSegQueue::new(dedicated_thread.is_some());
+        let message_queue = if let Some(size) = option.bounded() {
+            CrossbeamSegQueue::bounded(dedicated_thread.is_some(), size)
+        } else {
+            CrossbeamSegQueue::unbounded(dedicated_thread.is_some())
+        };
 
         let message_sender = message_queue.sender();
 
@@ -307,8 +336,23 @@ impl<T: 'static + Send> Mailbox<T> {
 
     pub(crate) fn send(&self, self_ref: ActorRef<T>, msg: Message<T>) {
         if !self.is_terminated() {
-            self.message_queue.push(msg);
+            if let Ok(_) = self.message_queue.push(msg) {
+                self.schedule(self_ref);
+            }
+        }
+    }
+
+    pub(crate) fn try_send(
+        &self,
+        self_ref: ActorRef<T>,
+        msg: Message<T>,
+    ) -> Result<(), Message<T>> {
+        if !self.is_terminated() {
+            self.message_queue.push(msg)?;
             self.schedule(self_ref);
+            Ok(())
+        } else {
+            Err(msg)
         }
     }
 

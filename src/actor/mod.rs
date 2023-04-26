@@ -128,6 +128,14 @@ impl<T: 'static + Send> ActorRef<T> {
         self.mbox.send(self.clone(), Message::User(msg));
     }
 
+    pub fn try_tell(&self, msg: T) -> Result<(), T> {
+        let res = self.mbox.try_send(self.clone(), Message::User(msg));
+        res.map_err(|err| match err {
+            Message::User(msg) => msg,
+            _ => panic!("not possible"),
+        })
+    }
+
     pub(crate) fn send(&self, msg: Message<T>) {
         self.mbox.send(self.clone(), msg);
     }

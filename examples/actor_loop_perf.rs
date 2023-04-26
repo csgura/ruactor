@@ -29,7 +29,9 @@ impl Actor for TestActor {
 }
 
 #[derive(Clone)]
-struct MainActor {}
+struct MainActor {
+    bounded: bool,
+}
 
 impl Actor for MainActor {
     type Message = TestMessage;
@@ -41,11 +43,21 @@ impl Actor for MainActor {
     ) {
         match message {
             TestMessage::World(str, reply_to) => {
-                let child = context.get_or_create_child(
-                    str.clone(),
-                    props_from_clone(TestActor {}).with_throughput(2000000),
-                );
-                child.tell(TestMessage::World(str, reply_to));
+                if self.bounded {
+                    let child = context.get_or_create_child(
+                        str.clone(),
+                        props_from_clone(TestActor {})
+                            .with_throughput(2000000)
+                            .with_bounded_queue(1000000),
+                    );
+                    child.tell(TestMessage::World(str, reply_to));
+                } else {
+                    let child = context.get_or_create_child(
+                        str.clone(),
+                        props_from_clone(TestActor {}).with_throughput(2000000),
+                    );
+                    child.tell(TestMessage::World(str, reply_to));
+                }
             }
             _ => {}
         }
@@ -140,7 +152,7 @@ async fn main() {
     );
 
     let actor_ref = asys
-        .create_actor("main", props_from_clone(MainActor {}))
+        .create_actor("main", props_from_clone(MainActor { bounded: false }))
         .expect("failed");
 
     // main actor wait
@@ -200,7 +212,7 @@ async fn main() {
     let actor_ref = asys
         .create_actor(
             "dedi",
-            props_from_clone(MainActor {}).with_dedicated_thread(3),
+            props_from_clone(MainActor { bounded: false }).with_dedicated_thread(3),
         )
         .expect("failed");
 
@@ -224,6 +236,40 @@ async fn main() {
 
     println!(
         "actor loop dedi send/recv : elapsed = {:?}, tps =  {}",
+        elapsed,
+        count as f64 / elapsed.as_secs_f64()
+    );
+
+    // dedicated send/recv
+    let actor_ref = asys
+        .create_actor(
+            "bounded",
+            props_from_clone(MainActor { bounded: true })
+                .with_dedicated_thread(3)
+                .with_bounded_queue(1000000),
+        )
+        .expect("failed");
+
+    let mut wait = Vec::new();
+
+    let start = Instant::now();
+
+    for _ in 0..count {
+        let ch = tokio::sync::oneshot::channel();
+        wait.push(ch.1);
+        actor_ref.tell(TestMessage::World("hello".into(), ch.0));
+    }
+
+    for h in wait {
+        let _ = h.await.expect("no answer");
+    }
+
+    let end = Instant::now();
+
+    let elapsed = end - start;
+
+    println!(
+        "actor loop dedi bounded send/recv : elapsed = {:?}, tps =  {}",
         elapsed,
         count as f64 / elapsed.as_secs_f64()
     );

@@ -60,13 +60,21 @@ impl ActorError {
 macro_rules! ask {
     (@tell: $actor_ref:expr, $m:expr, $rx:expr, $tmout:expr) => {
         {
-            ($actor_ref).tell($m);
-            let recv = tokio::time::timeout($tmout, $rx);
-            match recv.await {
-                Ok(Ok(v)) => Ok(v),
-                Ok(Err(err)) => Err($crate::ActorError::from(err)),
-                Err(err) => Err($crate::ActorError::from(err)),
+            let send_ok = ($actor_ref).try_tell($m);
+            match send_ok {
+                Ok(_) => {
+                    let recv = tokio::time::timeout($tmout, $rx);
+                    match recv.await {
+                        Ok(Ok(v)) => Ok(v),
+                        Ok(Err(err)) => Err($crate::ActorError::from(err)),
+                        Err(err) => Err($crate::ActorError::from(err)),
+                    }
+                },
+                Err(_) => {
+                    Err($crate::ActorError::SendError(format!("actor {} mailbox full", $actor_ref)))
+                }
             }
+
         }
     };
 
@@ -123,8 +131,9 @@ macro_rules! reply_to {
 }
 
 pub async fn benchmark_actor_loop<T: 'static + Send>(actor_ref: ActorRef<T>, bulk: Vec<T>) {
-    bulk.into_iter()
-        .for_each(|m| actor_ref.mbox.message_queue.push(actor::Message::User(m)));
+    bulk.into_iter().for_each(|m| {
+        let _ = actor_ref.mbox.message_queue.push(actor::Message::User(m));
+    });
 
     let mut dp = actor_ref.mbox.dispatcher.lock().await;
     dp.actor_loop(actor_ref.clone()).await;
