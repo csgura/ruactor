@@ -46,8 +46,6 @@ pub struct Dispatcher<T: 'static + Send> {
     pub(crate) watcher: Vec<ReplyTo<()>>,
 }
 
-struct PanicError {}
-
 fn pop_internal_message<T: 'static + Send>(self_ref: &ActorRef<T>) -> Option<InternalMessage> {
     self_ref.mbox.internal_queue.pop()
 }
@@ -204,7 +202,7 @@ impl<T: 'static + Send> Dispatcher<T> {
         }
     }
 
-    async fn on_message_in_context(
+    async fn on_message(
         &mut self,
         self_ref: &ActorRef<T>,
         context: &mut ActorContext<T>,
@@ -262,20 +260,28 @@ impl<T: 'static + Send> Dispatcher<T> {
             }
         }
     }
-    async fn on_message(
+
+    async fn process_message(
         &mut self,
         self_ref: &ActorRef<T>,
         context: &mut ActorContext<T>,
         message: Message<T>,
-    ) -> Result<(), PanicError> {
-        let res = AssertUnwindSafe(self.on_message_in_context(self_ref, context, message))
+    ) {
+        let res = AssertUnwindSafe(self.on_message(self_ref, context, message))
             .catch_unwind()
             .await;
-        self.check_become(self_ref, context);
 
         match res {
-            Ok(_) => Ok(()),
-            Err(_) => Err(PanicError {}),
+            Ok(_) => {
+                self.check_become(self_ref, context);
+            }
+            Err(_) => {
+                let old_actor = self.actor.take();
+                self.on_exit(old_actor, self_ref, context);
+
+                self.actor = Some(self.prop.create());
+                self.on_enter(&self_ref, context);
+            }
         }
     }
 
@@ -287,25 +293,6 @@ impl<T: 'static + Send> Dispatcher<T> {
     //     let child = replace(&mut context.cell.childrens, Default::default());
     //     child
     // }
-
-    async fn process_message(
-        &mut self,
-        self_ref: &ActorRef<T>,
-        context: &mut ActorContext<T>,
-        msg: Message<T>,
-    ) {
-        self.process_internal_message_all(self_ref, context);
-
-        let res = self.on_message(self_ref, context, msg).await;
-        if let Err(_) = res {
-            //println!("panic occurred {:?}", err);
-            let old_actor = self.actor.take();
-            self.on_exit(old_actor, self_ref, context);
-
-            self.actor = Some(self.prop.create());
-            self.on_enter(&self_ref, context);
-        }
-    }
 
     #[allow(dead_code)]
     fn num_internal_message(&self, self_ref: &ActorRef<T>) -> usize {
@@ -334,6 +321,8 @@ impl<T: 'static + Send> Dispatcher<T> {
         self_ref: &ActorRef<T>,
         context: &mut ActorContext<T>,
     ) -> Option<Message<T>> {
+        self.process_internal_message_all(self_ref, context);
+
         if self_ref.mbox.is_terminated() {
             return None;
         }
@@ -370,8 +359,6 @@ impl<T: 'static + Send> Dispatcher<T> {
         // }
 
         let throuthput = self_ref.mbox.option.throughput();
-
-        self.process_internal_message_all(&self_ref, &mut context);
 
         let mut count = 0;
         while let Some(msg) = self.next_message(&self_ref, &mut context) {
