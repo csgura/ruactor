@@ -377,9 +377,6 @@ impl<T: 'static + Send> Dispatcher<T> {
         while let Some(msg) = self.next_message(&self_ref, &mut context) {
             self.process_message(&self_ref, &mut context, msg).await;
 
-            // 현재.  recv 할 때  async await 하고 있으니.
-            // 여기서 yield 하는 코드는 필요 없을 듯.
-
             count += 1;
 
             if count >= throuthput {
