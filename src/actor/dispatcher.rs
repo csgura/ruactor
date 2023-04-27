@@ -46,10 +46,6 @@ pub struct Dispatcher<T: 'static + Send> {
     pub(crate) watcher: Vec<ReplyTo<()>>,
 }
 
-fn pop_internal_message<T: 'static + Send>(self_ref: &ActorRef<T>) -> Option<InternalMessage> {
-    self_ref.mbox.internal_queue.pop()
-}
-
 impl<T: 'static + Send> Dispatcher<T> {
     fn create_context(&mut self, self_ref: &ActorRef<T>) {
         if self.context.is_none() {
@@ -238,13 +234,24 @@ impl<T: 'static + Send> Dispatcher<T> {
             + context.cell.unstashed.len()
     }
 
+    fn pop_internal_message(&mut self, self_ref: &ActorRef<T>) -> Option<InternalMessage> {
+        if self.context.is_none() {
+            return None;
+        }
+        self_ref.mbox.internal_queue.pop()
+    }
+
     fn process_internal_message_all(&mut self, self_ref: &ActorRef<T>) {
-        while let Some(msg) = pop_internal_message(self_ref) {
+        while let Some(msg) = self.pop_internal_message(self_ref) {
             self.on_internal_message(self_ref, msg);
         }
     }
 
     fn next_message(&mut self, self_ref: &ActorRef<T>) -> Option<Message<T>> {
+        if self.context.is_none() {
+            return None;
+        }
+
         self.process_internal_message_all(self_ref);
 
         if self_ref.mbox.is_terminated() {

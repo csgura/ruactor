@@ -194,6 +194,9 @@ pub trait Actor: Send + 'static {
         context: &mut ActorContext<Self::Message>,
         message: SystemMessage,
     ) {
+        match message {
+            SystemMessage::ReceiveTimeout => context.stop_self(),
+        }
     }
 }
 
