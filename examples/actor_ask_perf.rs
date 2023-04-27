@@ -61,6 +61,56 @@ impl Actor for MainActor {
     }
 }
 
+struct MainChannel {
+    rx: tokio::sync::mpsc::UnboundedReceiver<TestMessage>,
+    tx: tokio::sync::mpsc::UnboundedSender<TestMessage>,
+}
+
+impl MainChannel {
+    fn new() -> tokio::sync::mpsc::UnboundedSender<TestMessage> {
+        let ch = tokio::sync::mpsc::unbounded_channel();
+
+        tokio::spawn(async move {
+            let c = ChildChannel::new();
+            let mut m = MainChannel { rx: ch.1, tx: c };
+            m.receive().await;
+        });
+
+        ch.0
+    }
+
+    async fn receive(&mut self) {
+        while let Some(msg) = self.rx.recv().await {
+            let _ = self.tx.send(msg);
+        }
+    }
+}
+
+struct ChildChannel {
+    rx: tokio::sync::mpsc::UnboundedReceiver<TestMessage>,
+}
+
+impl ChildChannel {
+    fn new() -> tokio::sync::mpsc::UnboundedSender<TestMessage> {
+        let ch = tokio::sync::mpsc::unbounded_channel();
+
+        tokio::spawn(async move {
+            let mut c = ChildChannel { rx: ch.1 };
+            c.receive().await;
+        });
+        ch.0
+    }
+    async fn receive(&mut self) {
+        while let Some(msg) = self.rx.recv().await {
+            match msg {
+                TestMessage::World(_str, sender) => {
+                    let _ = sender.send(());
+                }
+            }
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() {
     let asys = ActorSystem::new("app");
@@ -73,7 +123,7 @@ async fn main() {
 
     let total_count = 10000000;
     let mut js = JoinSet::new();
-    let num_cli = 2;
+    let num_cli = 10;
     let count = total_count / num_cli;
     for _ in 0..num_cli {
         let ac = actor_ref.clone();
@@ -99,7 +149,36 @@ async fn main() {
     let elapsed = end - start;
 
     println!(
-        "actor ask dedi bounded send/recv : elapsed = {:?}, tps =  {}",
+        "actor ask : elapsed = {:?}, tps =  {}",
+        elapsed,
+        num_cli as f64 * count as f64 / elapsed.as_secs_f64()
+    );
+
+    let ch = MainChannel::new();
+
+    for _ in 0..num_cli {
+        let ac = ch.clone();
+        js.spawn(async move {
+            for _ in 0..count {
+                let one = tokio::sync::oneshot::channel();
+
+                let _ = ac.send(TestMessage::World("hello".into(), one.0));
+                let res = one.1.await;
+                if let Err(err) = res {
+                    println!("err = {}", err);
+                }
+            }
+        });
+    }
+
+    while let Some(_) = js.join_next().await {}
+
+    let end = Instant::now();
+
+    let elapsed = end - start;
+
+    println!(
+        "channel ask : elapsed = {:?}, tps =  {}",
         elapsed,
         num_cli as f64 * count as f64 / elapsed.as_secs_f64()
     );
