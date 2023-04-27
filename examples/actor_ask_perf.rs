@@ -71,9 +71,10 @@ async fn main() {
 
     let start = Instant::now();
 
+    let total_count = 10000000;
     let mut js = JoinSet::new();
-    let num_cli = 1000;
-    let count = 1000;
+    let num_cli = 2;
+    let count = total_count / num_cli;
     for _ in 0..num_cli {
         let ac = actor_ref.clone();
         js.spawn(async move {
