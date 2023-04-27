@@ -24,7 +24,6 @@ pub(crate) enum SuspendReason {
 }
 
 pub struct ActorCell<T: 'static + Send> {
-    pub(crate) parent: Option<Box<dyn ParentRef>>,
     pub(crate) stash: Vec<T>,
     pub(crate) unstashed: Vec<T>,
     pub(crate) timer: Timer,
@@ -38,7 +37,6 @@ pub struct ActorCell<T: 'static + Send> {
 impl<T: 'static + Send> Default for ActorCell<T> {
     fn default() -> Self {
         Self {
-            parent: Default::default(),
             stash: Default::default(),
             unstashed: Default::default(),
             timer: Default::default(),
@@ -52,11 +50,8 @@ impl<T: 'static + Send> Default for ActorCell<T> {
 }
 
 impl<T: 'static + Send> ActorCell<T> {
-    pub(crate) fn new(parent: Option<Box<dyn ParentRef>>) -> Self {
-        Self {
-            parent,
-            ..Default::default()
-        }
+    pub(crate) fn new() -> Self {
+        Default::default()
     }
 }
 

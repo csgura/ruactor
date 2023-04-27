@@ -38,6 +38,7 @@ impl Default for Timer {
 }
 
 pub struct Dispatcher<T: 'static + Send> {
+    pub(crate) parent: Option<Box<dyn ParentRef>>,
     pub(crate) actor: Option<Box<dyn Actor<Message = T>>>,
     pub(crate) prop: Box<dyn PropDyn<T>>,
     pub(crate) last_message_timestamp: Instant,
@@ -52,8 +53,6 @@ fn pop_internal_message<T: 'static + Send>(self_ref: &ActorRef<T>) -> Option<Int
 
 impl<T: 'static + Send> Dispatcher<T> {
     fn create_context(&mut self, self_ref: &ActorRef<T>) -> ActorContext<T> {
-        //println!("create context");
-
         let cell = self.cell.take();
         ActorContext {
             self_ref: self_ref.clone(),
@@ -64,7 +63,6 @@ impl<T: 'static + Send> Dispatcher<T> {
     }
 
     fn drop_context(&mut self, _self_ref: &ActorRef<T>, context: ActorContext<T>) {
-        //println!("drop context");
         self.cell = Some(context.cell);
     }
 
@@ -103,7 +101,6 @@ impl<T: 'static + Send> Dispatcher<T> {
 
         self.on_exit(old_actor, self_ref, context);
 
-        // println!("actor {} send teminated", self_ref);
         if let Some(parent) = self.take_parent(context) {
             parent.send_internal_message(InternalMessage::ChildTerminate(self_ref.path.clone()))
         }
@@ -128,75 +125,27 @@ impl<T: 'static + Send> Dispatcher<T> {
                 }
             }
             InternalMessage::Terminate => {
-                //println!("stop actor {}", self_ref);
                 self_ref.mbox.close();
 
-                {
-                    if context.cell.childrens.len() > 0 {
-                        context.cell.suspend_reason = Some(SuspendReason::ChildrenTermination);
+                if context.cell.childrens.len() > 0 {
+                    context.cell.suspend_reason = Some(SuspendReason::ChildrenTermination);
 
-                        context.cell.childrens.iter().for_each(|c| {
-                            //println!("{} send stop to {:?}", self_ref, c.1.stop_ref);
-                            c.1.stop_ref.stop();
-                        });
-                    } else {
-                        self.terminate(self_ref, context);
-                    }
-
-                    // let childs = self.take_childrens(context);
-
-                    // let mut join_set = JoinSet::new();
-
-                    // let mut childs = childs.into_iter().collect::<Vec<_>>();
-                    // while let Some((_, ch)) = childs.pop() {
-                    //     join_set.spawn_on(
-                    //         async move { ch.stop_ref.wait_stop().await },
-                    //         &self_ref.mbox.handle,
-                    //     );
-                    // }
-
-                    // while let Some(_) = join_set.join_next().await {}
+                    context.cell.childrens.iter().for_each(|c| {
+                        c.1.stop_ref.stop();
+                    });
+                } else {
+                    self.terminate(self_ref, context);
                 }
-
-                //self.cell.childrens.clear();
-
-                //println!("{} stop complete", self_ref);
             }
             InternalMessage::ChildTerminate(msg) => {
-                //println!("child terminated : {}", msg);
                 let key = msg.key();
-
-                // println!(
-                //     "before delete num children of {} = {}",
-                //     self_ref,
-                //     context.cell.childrens.len()
-                // );
 
                 context.cell.childrens.remove(&key);
 
-                // println!(
-                //     "num children of {} = {}",
-                //     self_ref,
-                //     context.cell.childrens.len()
-                // );
-
-                // let clist = context
-                //     .cell
-                //     .childrens
-                //     .iter()
-                //     .map(|c| c.0.as_str())
-                //     .collect::<Vec<_>>()
-                //     .join(",");
-                // println!("{}'s childrens = {}", self_ref, clist);
-
                 if context.cell.suspend_reason.is_some() && context.cell.childrens.len() == 0 {
-                    // println!("all children terminated");
                     context.cell.suspend_reason = None;
                     self.terminate(self_ref, context);
                 }
-
-                //self.cell.childrens.remove(&key);
-                // println!("after children size =  {}", context.childrens.len());
             }
             InternalMessage::Created => {}
         }
@@ -285,8 +234,8 @@ impl<T: 'static + Send> Dispatcher<T> {
         }
     }
 
-    fn take_parent(&mut self, context: &mut ActorContext<T>) -> Option<Box<dyn ParentRef>> {
-        context.cell.parent.take()
+    fn take_parent(&mut self, _context: &mut ActorContext<T>) -> Option<Box<dyn ParentRef>> {
+        self.parent.take()
     }
 
     // fn take_childrens(&mut self, context: &mut ActorContext<T>) -> HashMap<String, ChildContainer> {
@@ -348,15 +297,6 @@ impl<T: 'static + Send> Dispatcher<T> {
 
             self.on_enter(&self_ref, &mut context);
         }
-
-        // let mut actor = cell.actor;
-        // let mut ch = cell.ch;
-
-        // let mut stash = cell.stash;
-        // if self.num_total_message(&self_ref, &mut context) == 0 {
-        //     self.drop_context(&self_ref, context);
-        //     return;
-        // }
 
         let throuthput = self_ref.mbox.option.throughput();
 

@@ -241,10 +241,11 @@ impl<T: 'static + Send> Mailbox<T> {
         let message_sender = message_queue.sender();
 
         let dispatcher = Dispatcher {
+            parent,
             actor: None,
             prop: Box::new(pdyn),
             last_message_timestamp: Instant::now(),
-            cell: Some(ActorCell::new(parent)),
+            cell: Some(ActorCell::new()),
             message_queue,
             watcher: Default::default(),
         };

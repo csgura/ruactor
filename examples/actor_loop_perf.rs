@@ -278,17 +278,21 @@ async fn main() {
     let start = Instant::now();
 
     let mut js = JoinSet::new();
-    let num_cli = 100;
-    let count = 10000;
+    let num_cli = 1000;
+    let count = 1000;
     for _ in 0..num_cli {
         let ac = actor_ref.clone();
         js.spawn(async move {
             for _ in 0..count {
-                let _ = ask!(
+                let res = ask!(
                     ac,
                     TestMessage::World("hello".into(), _),
                     Duration::from_secs(5)
                 );
+
+                if let Err(err) = res {
+                    println!("err = {}", err);
+                }
             }
         });
     }
