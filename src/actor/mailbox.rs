@@ -13,9 +13,7 @@ use tokio::sync::Mutex;
 
 use crate::{Actor, ActorPath, Props, PropsOption};
 
-use super::{
-    context::ActorCell, ActorRef, Dispatcher, InternalMessage, Message, ParentRef, PropWrap,
-};
+use super::{ActorRef, Dispatcher, InternalMessage, Message, ParentRef, PropWrap};
 
 #[allow(dead_code)]
 pub(crate) struct TokioChannelQueue<T: 'static + Send> {
@@ -245,7 +243,7 @@ impl<T: 'static + Send> Mailbox<T> {
             actor: None,
             prop: Box::new(pdyn),
             last_message_timestamp: Instant::now(),
-            cell: Some(ActorCell::new()),
+            context: None,
             message_queue,
             watcher: Default::default(),
         };

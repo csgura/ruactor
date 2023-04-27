@@ -49,12 +49,6 @@ impl<T: 'static + Send> Default for ActorCell<T> {
     }
 }
 
-impl<T: 'static + Send> ActorCell<T> {
-    pub(crate) fn new() -> Self {
-        Default::default()
-    }
-}
-
 const BASE64CHARS: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+~";
 
 fn base64(l: usize, s: String) -> String {

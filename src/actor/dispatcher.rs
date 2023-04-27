@@ -7,7 +7,6 @@ use std::time::Instant;
 
 use futures::FutureExt;
 
-use super::context::ActorCell;
 use super::context::ActorContext;
 use super::Actor;
 use super::ActorRef;
@@ -42,7 +41,7 @@ pub struct Dispatcher<T: 'static + Send> {
     pub(crate) actor: Option<Box<dyn Actor<Message = T>>>,
     pub(crate) prop: Box<dyn PropDyn<T>>,
     pub(crate) last_message_timestamp: Instant,
-    pub(crate) cell: Option<ActorCell<T>>,
+    pub(crate) context: Option<ActorContext<T>>,
     pub(crate) message_queue: CrossbeamSegQueue<T>,
     pub(crate) watcher: Vec<ReplyTo<()>>,
 }
@@ -52,70 +51,60 @@ fn pop_internal_message<T: 'static + Send>(self_ref: &ActorRef<T>) -> Option<Int
 }
 
 impl<T: 'static + Send> Dispatcher<T> {
-    fn create_context(&mut self, self_ref: &ActorRef<T>) -> ActorContext<T> {
-        let cell = self.cell.take();
-        ActorContext {
-            self_ref: self_ref.clone(),
-            actor: None,
-            cell: cell.expect("invalid state."),
-            handle: self_ref.mbox.handle.clone(),
+    fn create_context(&mut self, self_ref: &ActorRef<T>) {
+        if self.context.is_none() {
+            self.context = Some(ActorContext {
+                self_ref: self_ref.clone(),
+                actor: None,
+                cell: Default::default(),
+                handle: self_ref.mbox.handle.clone(),
+            })
         }
     }
 
-    fn drop_context(&mut self, _self_ref: &ActorRef<T>, context: ActorContext<T>) {
-        self.cell = Some(context.cell);
-    }
-
-    fn check_become(&mut self, self_ref: &ActorRef<T>, context: &mut ActorContext<T>) {
+    fn check_become(&mut self, self_ref: &ActorRef<T>) {
+        let context = self.context.as_mut().expect("must");
         if context.actor.is_some() {
             let old_actor = replace(&mut self.actor, context.actor.take());
 
-            self.on_exit(old_actor, self_ref, context);
+            self.on_exit(old_actor, self_ref);
 
-            self.on_enter(self_ref, context);
+            self.on_enter(self_ref);
         }
     }
 
-    fn on_exit(
-        &mut self,
-        old_actor: Option<Box<dyn Actor<Message = T>>>,
-        self_ref: &ActorRef<T>,
-        context: &mut ActorContext<T>,
-    ) {
+    fn on_exit(&mut self, old_actor: Option<Box<dyn Actor<Message = T>>>, self_ref: &ActorRef<T>) {
         if let Some(mut actor) = old_actor {
-            actor.on_exit(context);
-            self.check_become(self_ref, context);
+            actor.on_exit(self.context.as_mut().expect("must"));
+            self.check_become(self_ref);
         }
     }
 
-    fn on_enter(&mut self, self_ref: &ActorRef<T>, context: &mut ActorContext<T>) {
+    fn on_enter(&mut self, self_ref: &ActorRef<T>) {
         if let Some(actor) = &mut self.actor {
-            actor.on_enter(context);
-            self.check_become(self_ref, context);
+            actor.on_enter(self.context.as_mut().expect("must"));
+            self.check_become(self_ref);
         }
     }
 
-    fn terminate(&mut self, self_ref: &ActorRef<T>, context: &mut ActorContext<T>) {
+    fn terminate(&mut self, self_ref: &ActorRef<T>) {
         let da = None;
         let old_actor = replace(&mut self.actor, da);
 
-        self.on_exit(old_actor, self_ref, context);
+        self.on_exit(old_actor, self_ref);
 
-        if let Some(parent) = self.take_parent(context) {
+        if let Some(parent) = self.take_parent() {
             parent.send_internal_message(InternalMessage::ChildTerminate(self_ref.path.clone()))
         }
 
         let watcher = replace(&mut self.watcher, Default::default());
         watcher.into_iter().for_each(|x| {
             let _ = x.send(());
-        })
+        });
+
+        self.context = None;
     }
-    fn on_internal_message(
-        &mut self,
-        self_ref: &ActorRef<T>,
-        context: &mut ActorContext<T>,
-        message: InternalMessage,
-    ) {
+    fn on_internal_message(&mut self, self_ref: &ActorRef<T>, message: InternalMessage) {
         match message {
             InternalMessage::Watch(reply_to) => {
                 if self_ref.mbox.is_terminated() {
@@ -126,6 +115,7 @@ impl<T: 'static + Send> Dispatcher<T> {
             }
             InternalMessage::Terminate => {
                 self_ref.mbox.close();
+                let context: &mut ActorContext<T> = self.context.as_mut().expect("must");
 
                 if context.cell.childrens.len() > 0 {
                     context.cell.suspend_reason = Some(SuspendReason::ChildrenTermination);
@@ -134,30 +124,28 @@ impl<T: 'static + Send> Dispatcher<T> {
                         c.1.stop_ref.stop();
                     });
                 } else {
-                    self.terminate(self_ref, context);
+                    self.terminate(self_ref);
                 }
             }
             InternalMessage::ChildTerminate(msg) => {
                 let key = msg.key();
 
+                let context: &mut ActorContext<T> = self.context.as_mut().expect("must");
+
                 context.cell.childrens.remove(&key);
 
                 if context.cell.suspend_reason.is_some() && context.cell.childrens.len() == 0 {
                     context.cell.suspend_reason = None;
-                    self.terminate(self_ref, context);
+                    self.terminate(self_ref);
                 }
             }
             InternalMessage::Created => {}
         }
     }
 
-    async fn on_message(
-        &mut self,
-        self_ref: &ActorRef<T>,
-        context: &mut ActorContext<T>,
-        message: Message<T>,
-    ) {
+    async fn on_message(&mut self, self_ref: &ActorRef<T>, message: Message<T>) {
         if let Some(actor) = &mut self.actor {
+            let context = self.context.as_mut().expect("must");
             match message {
                 Message::User(msg) => {
                     if context.cell.receive_timeout.is_some() {
@@ -210,31 +198,26 @@ impl<T: 'static + Send> Dispatcher<T> {
         }
     }
 
-    async fn process_message(
-        &mut self,
-        self_ref: &ActorRef<T>,
-        context: &mut ActorContext<T>,
-        message: Message<T>,
-    ) {
-        let res = AssertUnwindSafe(self.on_message(self_ref, context, message))
+    async fn process_message(&mut self, self_ref: &ActorRef<T>, message: Message<T>) {
+        let res = AssertUnwindSafe(self.on_message(self_ref, message))
             .catch_unwind()
             .await;
 
         match res {
             Ok(_) => {
-                self.check_become(self_ref, context);
+                self.check_become(self_ref);
             }
             Err(_) => {
                 let old_actor = self.actor.take();
-                self.on_exit(old_actor, self_ref, context);
+                self.on_exit(old_actor, self_ref);
 
                 self.actor = Some(self.prop.create());
-                self.on_enter(&self_ref, context);
+                self.on_enter(&self_ref);
             }
         }
     }
 
-    fn take_parent(&mut self, _context: &mut ActorContext<T>) -> Option<Box<dyn ParentRef>> {
+    fn take_parent(&mut self) -> Option<Box<dyn ParentRef>> {
         self.parent.take()
     }
 
@@ -255,26 +238,20 @@ impl<T: 'static + Send> Dispatcher<T> {
             + context.cell.unstashed.len()
     }
 
-    fn process_internal_message_all(
-        &mut self,
-        self_ref: &ActorRef<T>,
-        context: &mut ActorContext<T>,
-    ) {
+    fn process_internal_message_all(&mut self, self_ref: &ActorRef<T>) {
         while let Some(msg) = pop_internal_message(self_ref) {
-            self.on_internal_message(self_ref, context, msg);
+            self.on_internal_message(self_ref, msg);
         }
     }
 
-    fn next_message(
-        &mut self,
-        self_ref: &ActorRef<T>,
-        context: &mut ActorContext<T>,
-    ) -> Option<Message<T>> {
-        self.process_internal_message_all(self_ref, context);
+    fn next_message(&mut self, self_ref: &ActorRef<T>) -> Option<Message<T>> {
+        self.process_internal_message_all(self_ref);
 
         if self_ref.mbox.is_terminated() {
             return None;
         }
+
+        let context: &mut ActorContext<T> = self.context.as_mut().expect("must");
 
         if let Some(msg) = context.cell.unstashed.pop() {
             return Some(Message::User(msg));
@@ -290,19 +267,19 @@ impl<T: 'static + Send> Dispatcher<T> {
             None
         };
 
-        let mut context = self.create_context(&self_ref);
+        self.create_context(&self_ref);
 
         if self.actor.is_none() {
             self.actor = Some(self.prop.create());
 
-            self.on_enter(&self_ref, &mut context);
+            self.on_enter(&self_ref);
         }
 
         let throuthput = self_ref.mbox.option.throughput();
 
         let mut count = 0;
-        while let Some(msg) = self.next_message(&self_ref, &mut context) {
-            self.process_message(&self_ref, &mut context, msg).await;
+        while let Some(msg) = self.next_message(&self_ref) {
+            self.process_message(&self_ref, msg).await;
 
             count += 1;
 
@@ -313,6 +290,5 @@ impl<T: 'static + Send> Dispatcher<T> {
                 }
             }
         }
-        self.drop_context(&self_ref, context);
     }
 }
