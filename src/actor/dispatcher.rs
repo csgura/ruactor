@@ -2,10 +2,9 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 
 use std::mem::replace;
+use std::panic;
 use std::panic::AssertUnwindSafe;
 use std::time::Instant;
-
-use futures::FutureExt;
 
 use super::context::ActorContext;
 use super::Actor;
@@ -139,7 +138,7 @@ impl<T: 'static + Send> Dispatcher<T> {
         }
     }
 
-    async fn on_message(&mut self, self_ref: &ActorRef<T>, message: Message<T>) {
+    fn on_message(&mut self, self_ref: &ActorRef<T>, message: Message<T>) {
         if let Some(actor) = &mut self.actor {
             let context = self.context.as_mut().expect("must");
             match message {
@@ -148,7 +147,7 @@ impl<T: 'static + Send> Dispatcher<T> {
                         self.last_message_timestamp = Instant::now();
                     }
 
-                    actor.on_message_async(context, msg).await;
+                    actor.on_message(context, msg);
                 }
                 Message::Timer(key, gen, msg) => {
                     if context.cell.receive_timeout.is_some() {
@@ -161,7 +160,7 @@ impl<T: 'static + Send> Dispatcher<T> {
                     };
 
                     if signal {
-                        actor.on_message_async(context, msg).await;
+                        actor.on_message(context, msg);
                     }
                 }
                 Message::AutoMessage(AutoMessage::PoisonPill) => context.stop_self(),
@@ -194,10 +193,12 @@ impl<T: 'static + Send> Dispatcher<T> {
         }
     }
 
-    async fn process_message(&mut self, self_ref: &ActorRef<T>, message: Message<T>) {
-        let res = AssertUnwindSafe(self.on_message(self_ref, message))
-            .catch_unwind()
-            .await;
+    fn process_message(&mut self, self_ref: &ActorRef<T>, message: Message<T>) {
+        // let res = AssertUnwindSafe(self.on_message(self_ref, message))
+        //     .catch_unwind()
+        //     .await;
+
+        let res = panic::catch_unwind(AssertUnwindSafe(|| self.on_message(self_ref, message)));
 
         match res {
             Ok(_) => {
@@ -267,7 +268,7 @@ impl<T: 'static + Send> Dispatcher<T> {
         self.message_queue.pop()
     }
 
-    pub async fn actor_loop(&mut self, self_ref: ActorRef<T>) {
+    pub fn actor_loop(&mut self, self_ref: ActorRef<T>) {
         let _guard = if self_ref.mbox.dedicated_runtime.is_some() {
             Some(self_ref.mbox.handle.enter())
         } else {
@@ -282,18 +283,17 @@ impl<T: 'static + Send> Dispatcher<T> {
             self.on_enter(&self_ref);
         }
 
-        let throuthput = self_ref.mbox.option.throughput();
+        let throughput = self_ref.mbox.option.throughput();
+        let dedicated = self_ref.mbox.dedicated_runtime.is_some();
 
         let mut count = 0;
         while let Some(msg) = self.next_message(&self_ref) {
-            self.process_message(&self_ref, msg).await;
+            self.process_message(&self_ref, msg);
+            if !dedicated {
+                count += 1;
 
-            count += 1;
-
-            if count >= throuthput {
-                count = 0;
-                if self_ref.mbox.dedicated_runtime.is_none() {
-                    tokio::task::yield_now().await;
+                if count >= throughput {
+                    break;
                 }
             }
         }

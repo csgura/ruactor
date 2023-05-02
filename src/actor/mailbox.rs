@@ -189,11 +189,11 @@ impl<T: 'static + Send> Drop for Mailbox<T> {
 //     }
 // }
 
-pub(crate) async fn receive<T: 'static + Send>(self_ref: ActorRef<T>) {
+pub(crate) fn receive<T: 'static + Send>(self_ref: ActorRef<T>) {
     let mbox = self_ref.mbox.as_ref();
 
     if let Ok(mut dispatcher) = mbox.dispatcher.try_lock() {
-        dispatcher.actor_loop(self_ref.clone()).await;
+        dispatcher.actor_loop(self_ref.clone());
         drop(dispatcher);
 
         mbox.running.store(false, Ordering::Release);
@@ -309,19 +309,19 @@ impl<T: 'static + Send> Mailbox<T> {
             self.running
                 .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
         {
-            if let Some(runtime) = &self.dedicated_runtime {
-                let handle = runtime.handle().clone();
+            receive(self_ref);
 
-                self.pool.spawn(move || {
-                    let sc = self_ref.clone();
-                    //let _guard = handle.enter();
-                    handle.block_on(async move {
-                        receive(sc).await;
-                    });
-                })
-            } else {
-                self.handle.spawn(async move { receive(self_ref).await });
-            }
+            // if let Some(runtime) = &self.dedicated_runtime {
+            //     let handle = runtime.handle().clone();
+
+            //     self.pool.spawn(move || {
+            //         let sc = self_ref.clone();
+            //         //let _guard = handle.enter();
+
+            //     })
+            // } else {
+            //     self.handle.spawn(async move { receive(self_ref).await });
+            // }
         }
     }
 

@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 
-use ruactor::{ask, props_from_clone, Actor, ActorSystem, Props, ReplyTo, SystemMessage};
-use tokio::task::JoinSet;
+use crossbeam::sync::WaitGroup;
+use ruactor::{ask, props_from_clone, Actor, ActorSystem, ReplyTo, SystemMessage};
 
 #[allow(dead_code)]
 enum TestMessage {
@@ -26,6 +26,11 @@ impl Actor for IdleState {
     ) {
         match message {
             TestMessage::World(str, reply_to) => {
+                //let _ = reply_to.send(());
+
+                // tokio::spawn(async move {
+                //     let _ = reply_to.send(());
+                // });
                 context.transit(WorkingState {
                     str,
                     reply_to: Some(reply_to),
@@ -108,17 +113,13 @@ impl Actor for MainActor {
     ) {
         match message {
             TestMessage::World(str, reply_to) => {
-                let child = context.get_or_create_child(
-                    str.clone(),
-                    props_from_clone(IdleState {}).with_throughput(2000000),
-                );
+                let child =
+                    context.get_or_create_child(str.clone(), props_from_clone(IdleState {}));
                 child.tell(TestMessage::World(str, reply_to));
             }
             TestMessage::Hello(str, reply_to) => {
-                let child = context.get_or_create_child(
-                    str.clone(),
-                    props_from_clone(IdleState {}).with_throughput(2000000),
-                );
+                let child =
+                    context.get_or_create_child(str.clone(), props_from_clone(IdleState {}));
                 child.tell(TestMessage::Hello(str, reply_to));
             }
             _ => {}
@@ -137,13 +138,16 @@ async fn main() {
     let start = Instant::now();
 
     let total_count = 1000000;
-    let mut js = JoinSet::new();
     let num_cli = 10;
     let count = total_count / num_cli;
+
+    let wg = WaitGroup::new();
+
     for i in 0..num_cli {
         let ac = actor_ref.clone();
         let _client_id = i;
-        js.spawn(async move {
+        let wg = wg.clone();
+        tokio::spawn(async move {
             for j in 0..count {
                 let key = format!("sess-{}", j);
 
@@ -153,10 +157,11 @@ async fn main() {
                     println!("err = {}", err);
                 }
             }
+            drop(wg);
         });
     }
 
-    while let Some(_) = js.join_next().await {}
+    wg.wait();
 
     let end = Instant::now();
 

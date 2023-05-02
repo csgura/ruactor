@@ -175,14 +175,6 @@ pub(crate) enum InternalMessage {
 pub trait Actor: Send + 'static {
     type Message: 'static + Send;
 
-    async fn on_message_async(
-        &mut self,
-        context: &mut ActorContext<Self::Message>,
-        message: Self::Message,
-    ) {
-        self.on_message(context, message)
-    }
-
     fn on_enter(&mut self, context: &mut ActorContext<Self::Message>) {}
 
     fn on_exit(&mut self, context: &mut ActorContext<Self::Message>) {}

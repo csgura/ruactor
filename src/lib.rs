@@ -136,5 +136,5 @@ pub async fn benchmark_actor_loop<T: 'static + Send>(actor_ref: ActorRef<T>, bul
     });
 
     let mut dp = actor_ref.mbox.dispatcher.lock().await;
-    dp.actor_loop(actor_ref.clone()).await;
+    dp.actor_loop(actor_ref.clone());
 }
