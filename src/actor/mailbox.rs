@@ -312,7 +312,9 @@ impl<T: 'static + Send> Mailbox<T> {
             self.running
                 .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
         {
-            receive(self_ref);
+            self.pool.spawn(move || {
+                receive(self_ref);
+            })
 
             // if let Some(runtime) = &self.dedicated_runtime {
             //     let handle = runtime.handle().clone();

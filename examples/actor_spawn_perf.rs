@@ -141,7 +141,7 @@ async fn main() {
     let start = Instant::now();
 
     let total_count = 1000000;
-    let num_cli = 40;
+    let num_cli = 10;
     let count = total_count / num_cli;
 
     let wg = WaitGroup::new();
