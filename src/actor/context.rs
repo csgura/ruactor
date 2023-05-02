@@ -100,12 +100,16 @@ impl<T: 'static + Send> ActorContext<T> {
             .insert(name.clone(), TimerMessage { gen: gen });
 
         let self_ref = self.self_ref.clone();
-        self.handle.spawn(async move {
-            let s = tokio::time::sleep(d);
-            s.await;
+        // self.handle.spawn(async move {
+        //     let s = tokio::time::sleep(d);
+        //     s.await;
 
+        //     self_ref.send(Message::Timer(name, gen, t));
+        // });
+
+        self.self_ref.mbox.scheduler.after_func(d, move || {
             self_ref.send(Message::Timer(name, gen, t));
-        });
+        })
     }
 
     pub fn cancel_timer<S>(&mut self, name: S)
@@ -126,16 +130,23 @@ impl<T: 'static + Send> ActorContext<T> {
     }
 
     pub(crate) fn schedule_receive_timeout(&mut self, d: Duration) {
-        let self_ref = self.self_ref.clone();
+        // let self_ref = self.self_ref.clone();
 
+        // let tmout = Instant::now() + d;
+
+        // self.handle.spawn(async move {
+        //     let s = tokio::time::sleep(d);
+        //     s.await;
+
+        //     self_ref.send(Message::ReceiveTimeout(tmout));
+        // });
+
+        let self_ref = self.self_ref.clone();
         let tmout = Instant::now() + d;
 
-        self.handle.spawn(async move {
-            let s = tokio::time::sleep(d);
-            s.await;
-
+        self.self_ref.mbox.scheduler.after_func(d, move || {
             self_ref.send(Message::ReceiveTimeout(tmout));
-        });
+        })
     }
 
     pub fn stash(&mut self, message: T) {
@@ -187,6 +198,7 @@ impl<T: 'static + Send> ActorContext<T> {
                     Some(Box::new(self.self_ref.clone())),
                     self.self_ref.mbox.pool.clone(),
                     self.handle.clone(),
+                    self.self_ref.mbox.scheduler.clone(),
                 );
 
                 let actor_ref = ActorRef::new(cpath, Arc::new(mbox));

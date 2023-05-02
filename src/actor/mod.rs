@@ -1,10 +1,11 @@
 use std::{
     any::Any,
     borrow::Cow,
+    collections::BinaryHeap,
     fmt::{Debug, Display},
     marker::PhantomData,
     sync::Arc,
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 mod context;
@@ -98,6 +99,7 @@ impl<T: 'static + Send> Debug for ActorRef<T> {
 }
 
 use async_trait::async_trait;
+use crossbeam::queue::SegQueue;
 pub use dispatcher::Dispatcher;
 pub use mailbox::Mailbox;
 
@@ -210,4 +212,98 @@ impl<A: Actor, P: Props<A>> PropDyn<A::Message> for PropWrap<A, P> {
 pub(crate) struct ChildContainer {
     pub(crate) actor_ref: Box<dyn Any + Send + Sync + 'static>,
     pub(crate) stop_ref: Box<dyn InternalActorRef>,
+}
+
+pub struct SchedulerTask {
+    event_time: Instant,
+    action: Box<dyn FnOnce() + Send>,
+}
+
+impl PartialEq for SchedulerTask {
+    fn eq(&self, other: &Self) -> bool {
+        self.event_time == other.event_time
+    }
+}
+
+impl Eq for SchedulerTask {}
+
+impl PartialOrd for SchedulerTask {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.event_time.partial_cmp(&other.event_time)
+    }
+}
+
+impl Ord for SchedulerTask {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.event_time.cmp(&other.event_time)
+    }
+}
+
+enum SchedulerMessage {
+    Close,
+    Task(SchedulerTask),
+}
+
+#[derive(Clone)]
+pub struct Scheduler {
+    queue: Arc<SegQueue<SchedulerMessage>>,
+}
+
+impl Drop for Scheduler {
+    fn drop(&mut self) {
+        self.queue.push(SchedulerMessage::Close)
+    }
+}
+impl Scheduler {
+    pub(crate) fn after_func(&self, d: Duration, f: impl FnOnce() + 'static + Send) {
+        self.queue.push(SchedulerMessage::Task(SchedulerTask {
+            event_time: Instant::now() + d,
+            action: Box::new(f),
+        }))
+    }
+
+    pub(crate) fn new() -> Self {
+        Scheduler {
+            queue: Default::default(),
+        }
+    }
+
+    pub(crate) fn run(&self, name: &str) {
+        let queue = self.queue.clone();
+
+        let res = std::thread::Builder::new()
+            .name(format!("{}-scheduler", name))
+            .spawn(move || {
+                let mut bheap: BinaryHeap<SchedulerTask> = BinaryHeap::new();
+
+                loop {
+                    while let Some(msg) = queue.pop() {
+                        match msg {
+                            SchedulerMessage::Close => {
+                                return;
+                            }
+                            SchedulerMessage::Task(task) => bheap.push(task),
+                        }
+                    }
+
+                    let now = Instant::now();
+
+                    while let Some(task) = bheap.pop() {
+                        if task.event_time < now {
+                            (task.action)()
+                        } else {
+                            bheap.push(task);
+                            break;
+                        }
+                    }
+
+                    if queue.len() == 0 {
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                }
+            });
+        if let Err(err) = res {
+            panic!("can't start scheduler thread : {}", err);
+        }
+    }
 }

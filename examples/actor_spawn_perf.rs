@@ -73,6 +73,8 @@ impl Actor for WorkingState {
 
     fn on_enter(&mut self, context: &mut ruactor::ActorContext<Self::Message>) {
         let self_ref = context.self_ref();
+        //self_ref.tell(TestMessage::Done);
+
         tokio::spawn(async move {
             self_ref.tell(TestMessage::Done);
         });
@@ -138,7 +140,7 @@ async fn main() {
     let start = Instant::now();
 
     let total_count = 1000000;
-    let num_cli = 10;
+    let num_cli = 40;
     let count = total_count / num_cli;
 
     let wg = WaitGroup::new();
