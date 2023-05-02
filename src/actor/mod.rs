@@ -229,13 +229,13 @@ impl Eq for SchedulerTask {}
 
 impl PartialOrd for SchedulerTask {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.event_time.partial_cmp(&other.event_time)
+        Some(self.event_time.cmp(&other.event_time).reverse())
     }
 }
 
 impl Ord for SchedulerTask {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.event_time.cmp(&other.event_time)
+        self.event_time.cmp(&other.event_time).reverse()
     }
 }
 

@@ -269,11 +269,7 @@ impl<T: 'static + Send> Dispatcher<T> {
     }
 
     pub fn actor_loop(&mut self, self_ref: ActorRef<T>) {
-        let _guard = if self_ref.mbox.dedicated_runtime.is_some() {
-            Some(self_ref.mbox.handle.enter())
-        } else {
-            None
-        };
+        let _guard = self_ref.mbox.handle.enter();
 
         self.create_context(&self_ref);
 

@@ -56,6 +56,7 @@ impl Actor for IdleState {
         context: &mut ruactor::ActorContext<Self::Message>,
         message: ruactor::SystemMessage,
     ) {
+        //println!("actor {} receive timeout ", context.self_ref());
         match message {
             SystemMessage::ReceiveTimeout => context.stop_self(),
         }
@@ -174,4 +175,6 @@ async fn main() {
         elapsed,
         num_cli as f64 * count as f64 / elapsed.as_secs_f64()
     );
+
+    //tokio::time::sleep(Duration::from_secs(2)).await;
 }
