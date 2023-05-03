@@ -89,6 +89,10 @@ impl Actor for Hello {
             TestMessage::Timer("timer".into()),
         );
     }
+
+    fn on_exit(&mut self, context: &mut ActorContext<Self::Message>) {
+        println!("hello on exit")
+    }
 }
 #[derive(Debug)]
 enum TestMessage {

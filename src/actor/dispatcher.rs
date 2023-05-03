@@ -268,6 +268,21 @@ impl<T: 'static + Send> Dispatcher<T> {
     }
 
     pub async fn actor_loop(&mut self, self_ref: ActorRef<T>) {
+        // actor 가 완전히 terminate 되면 parent 가 없음.
+        if self.parent.is_none() {
+            while let Some(msg) = self_ref.mbox.internal_queue.pop() {
+                match msg {
+                    InternalMessage::Created => {}
+                    InternalMessage::ChildTerminate(_) => {}
+                    InternalMessage::Terminate => {}
+                    InternalMessage::Watch(sender) => {
+                        let _ = sender.send(());
+                    }
+                }
+            }
+
+            return;
+        }
         let _guard = if self_ref.mbox.dedicated_runtime.is_some() {
             Some(self_ref.mbox.handle.enter())
         } else {

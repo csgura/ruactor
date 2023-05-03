@@ -164,6 +164,17 @@ pub(crate) enum Message<T: 'static + Send> {
     AutoMessage(AutoMessage),
 }
 
+impl<T: 'static + Send> Message<T> {
+    pub(crate) fn kind(&self) -> &str {
+        match self {
+            Message::User(_) => "user message",
+            Message::Timer(_, _, _) => "timer message",
+            Message::ReceiveTimeout(_) => "receive timeout",
+            Message::AutoMessage(_) => "auto message",
+        }
+    }
+}
+
 #[derive(Debug)]
 pub(crate) enum InternalMessage {
     Created,
