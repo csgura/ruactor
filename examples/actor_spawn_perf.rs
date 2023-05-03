@@ -130,6 +130,17 @@ impl Actor for MainActor {
 
 #[tokio::main]
 async fn main() {
+    // let handle = tokio::runtime::Handle::current();
+    //let runtime_monitor = tokio_metrics::RuntimeMonitor::new(&handle);
+
+    // let frequency = std::time::Duration::from_millis(500);
+    // tokio::spawn(async move {
+    //     for metrics in runtime_monitor.intervals() {
+    //         println!("Metrics = {:?}", metrics);
+    //         tokio::time::sleep(frequency).await;
+    //     }
+    // });
+
     let asys = ActorSystem::new("app");
 
     let actor_ref = asys
@@ -169,4 +180,9 @@ async fn main() {
         elapsed,
         num_cli as f64 * count as f64 / elapsed.as_secs_f64()
     );
+
+    // let metrics = runtime_monitor.intervals();
+    // println!("Metrics = {:?}", metrics);
+
+    //tokio::time::sleep(Duration::from_secs(1)).await;
 }
