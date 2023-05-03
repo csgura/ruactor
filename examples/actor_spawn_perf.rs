@@ -70,7 +70,8 @@ impl Actor for WorkingState {
         let self_ref = context.self_ref();
         //self_ref.tell(TestMessage::Done);
 
-        tokio::spawn(async move {
+        context.spawn(async move {
+            //tokio::time::sleep(Duration::from_millis(1)).await;
             self_ref.tell(TestMessage::Done);
         });
     }

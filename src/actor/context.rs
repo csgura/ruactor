@@ -2,8 +2,11 @@ use std::{
     borrow::Cow,
     collections::HashMap,
     sync::Arc,
+    task::Context,
     time::{Duration, Instant},
 };
+
+use futures::{Future, FutureExt};
 
 use crate::{Actor, Props};
 
@@ -76,6 +79,22 @@ impl<T: 'static + Send> ActorContext<T> {
 
     pub fn transit<A: Actor<Message = T> + 'static>(&mut self, new_actor: A) {
         self.actor = Some(Box::new(new_actor));
+    }
+
+    pub fn spawn(&mut self, f: impl Future<Output = ()> + Send + 'static) {
+        let mut f = Box::pin(f);
+
+        let waker = futures::task::noop_waker();
+        let mut ctx = Context::from_waker(&waker);
+
+        let res = f.poll_unpin(&mut ctx);
+
+        match res {
+            std::task::Poll::Ready(_) => {}
+            std::task::Poll::Pending => {
+                self.handle.spawn(f);
+            }
+        }
     }
 
     fn next_timer_gen(&mut self) -> u32 {

@@ -90,7 +90,7 @@ impl Actor for Hello {
         );
     }
 
-    fn on_exit(&mut self, context: &mut ActorContext<Self::Message>) {
+    fn on_exit(&mut self, _context: &mut ActorContext<Self::Message>) {
         println!("hello on exit")
     }
 }
