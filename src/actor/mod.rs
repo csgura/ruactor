@@ -4,7 +4,10 @@ use std::{
     collections::BinaryHeap,
     fmt::{Debug, Display},
     marker::PhantomData,
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     time::{Duration, Instant},
 };
 
@@ -236,6 +239,13 @@ pub(crate) struct ChildContainer {
 pub struct SchedulerTask {
     event_time: Instant,
     action: Box<dyn FnOnce() + Send>,
+    cancelled: Arc<AtomicBool>,
+}
+
+impl SchedulerTask {
+    fn is_active(&self) -> bool {
+        self.cancelled.load(Ordering::Acquire)
+    }
 }
 
 impl PartialEq for SchedulerTask {
@@ -273,12 +283,28 @@ impl Drop for Scheduler {
         self.queue.push(SchedulerMessage::Close)
     }
 }
+
+pub(crate) struct Scheduled {
+    cancelled: Arc<AtomicBool>,
+}
+
+impl Drop for Scheduled {
+    fn drop(&mut self) {
+        self.cancelled.store(true, Ordering::Release);
+    }
+}
+
 impl Scheduler {
-    pub(crate) fn after_func(&self, d: Duration, f: impl FnOnce() + 'static + Send) {
+    pub(crate) fn after_func(&self, d: Duration, f: impl FnOnce() + 'static + Send) -> Scheduled {
+        let cancelled = Arc::new(AtomicBool::new(false));
+
         self.queue.push(SchedulerMessage::Task(SchedulerTask {
             event_time: Instant::now() + d,
             action: Box::new(f),
-        }))
+            cancelled: cancelled.clone(),
+        }));
+
+        Scheduled { cancelled }
     }
 
     pub(crate) fn new() -> Self {
@@ -301,18 +327,24 @@ impl Scheduler {
                             SchedulerMessage::Close => {
                                 return;
                             }
-                            SchedulerMessage::Task(task) => bheap.push(task),
+                            SchedulerMessage::Task(task) => {
+                                if task.is_active() {
+                                    bheap.push(task);
+                                }
+                            }
                         }
                     }
 
                     let now = Instant::now();
 
                     while let Some(task) = bheap.pop() {
-                        if task.event_time < now {
-                            (task.action)()
-                        } else {
-                            bheap.push(task);
-                            break;
+                        if task.is_active() {
+                            if task.event_time < now {
+                                (task.action)()
+                            } else {
+                                bheap.push(task);
+                                break;
+                            }
                         }
                     }
 
