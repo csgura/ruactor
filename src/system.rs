@@ -7,7 +7,7 @@ use std::sync::{RwLock, Weak};
 use rayon::ThreadPool;
 use tokio::runtime::{Handle, RuntimeFlavor};
 
-use crate::actor::{ChildContainer, InternalMessage, ParentRef};
+use crate::actor::{ChildContainer, InternalMessage, ParentRef, Scheduler};
 use crate::ActorError;
 use crate::{
     actor::{Actor, ActorRef, Mailbox},
@@ -186,6 +186,7 @@ pub struct ActorSystem {
     name: String,
     actors: Arc<UserGuard>,
     pool: Arc<ThreadPool>,
+    scheduler: Arc<Scheduler>,
 }
 
 impl UserGuard {
@@ -299,6 +300,7 @@ impl ActorSystem {
             Some(Box::new(parent)),
             self.pool.clone(),
             tokio::runtime::Handle::current(),
+            self.scheduler.clone(),
         );
 
         let actor_ref = ActorRef::new(path, Arc::new(mbox));
@@ -395,10 +397,15 @@ impl ActorSystem {
             .build()
             .unwrap();
 
+        let sced = Arc::new(Scheduler::new());
+
+        sced.run(&name);
+
         ActorSystem {
             name,
             actors: Arc::new(UserGuard(actors)),
             pool: Arc::new(pool),
+            scheduler: sced,
         }
     }
 }

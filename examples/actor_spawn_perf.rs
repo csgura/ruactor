@@ -68,6 +68,8 @@ impl Actor for WorkingState {
 
     fn on_enter(&mut self, context: &mut ruactor::ActorContext<Self::Message>) {
         let self_ref = context.self_ref();
+        //self_ref.tell(TestMessage::Done);
+
         tokio::spawn(async move {
             self_ref.tell(TestMessage::Done);
         });
