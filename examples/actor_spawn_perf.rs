@@ -17,7 +17,7 @@ impl Actor for IdleState {
     type Message = TestMessage;
 
     fn on_enter(&mut self, context: &mut ruactor::ActorContext<Self::Message>) {
-        context.set_receive_timeout(Duration::from_secs(1))
+        context.set_receive_timeout(Duration::from_secs(5))
     }
     fn on_message(
         &mut self,
@@ -76,9 +76,15 @@ impl Actor for WorkingState {
         let self_ref = context.self_ref();
         //self_ref.tell(TestMessage::Done);
 
-        tokio::spawn(async move {
+        //let ch = tokio::sync::oneshot::channel();
+
+        context.spawn(async move {
+            //let res = ch.1.await;
+            //tokio::time::sleep(Duration::from_millis(1)).await;
             self_ref.tell(TestMessage::Done);
         });
+
+        //let _ = ch.0.send(());
     }
 
     fn on_exit(&mut self, context: &mut ruactor::ActorContext<Self::Message>) {
