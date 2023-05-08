@@ -17,7 +17,7 @@ impl Actor for IdleState {
     type Message = TestMessage;
 
     fn on_enter(&mut self, context: &mut ruactor::ActorContext<Self::Message>) {
-        context.set_receive_timeout(Duration::from_secs(1))
+        context.set_receive_timeout(Duration::from_secs(5))
     }
     fn on_message(
         &mut self,
@@ -152,7 +152,7 @@ async fn main() {
 
     let total_count = 1000000;
     let mut js = JoinSet::new();
-    let num_cli = 10;
+    let num_cli = 5;
     let count = total_count / num_cli;
     for i in 0..num_cli {
         let ac = actor_ref.clone();

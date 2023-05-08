@@ -263,7 +263,7 @@ impl<T: 'static + Send> Dispatcher<T> {
 
         let context: &mut ActorContext<T> = self.context.as_mut().expect("must");
 
-        if let Some(msg) = context.cell.unstashed.pop() {
+        if let Some(msg) = context.cell.unstashed.pop_front() {
             return Some(Message::User(msg));
         }
 
