@@ -184,9 +184,9 @@ impl Deref for UserGuard {
 #[derive(Clone)]
 pub struct ActorSystem {
     name: String,
+    scheduler: Arc<Scheduler>,
     actors: Arc<UserGuard>,
     pool: Arc<ThreadPool>,
-    scheduler: Arc<Scheduler>,
 }
 
 impl UserGuard {
@@ -300,7 +300,7 @@ impl ActorSystem {
             Some(Box::new(parent)),
             self.pool.clone(),
             tokio::runtime::Handle::current(),
-            self.scheduler.clone(),
+            self.scheduler.sender(),
         );
 
         let actor_ref = ActorRef::new(path, Arc::new(mbox));

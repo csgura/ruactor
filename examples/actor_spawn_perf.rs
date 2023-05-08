@@ -129,8 +129,7 @@ impl Actor for MainActor {
     }
 }
 
-#[tokio::main]
-async fn main() {
+async fn bench() {
     // let handle = tokio::runtime::Handle::current();
     //let runtime_monitor = tokio_metrics::RuntimeMonitor::new(&handle);
 
@@ -150,21 +149,23 @@ async fn main() {
 
     let start = Instant::now();
 
-    let total_count = 1000000;
+    let total_actor = 100000;
+    let num_message_per_actor = 10;
     let mut js = JoinSet::new();
-    let num_cli = 5;
-    let count = total_count / num_cli;
+    let num_cli = 1;
     for i in 0..num_cli {
         let ac = actor_ref.clone();
         let _client_id = i;
         js.spawn(async move {
-            for j in 0..count {
-                let key = format!("sess-{}", j);
+            for _ in 0..num_message_per_actor {
+                for j in 0..total_actor {
+                    let key = format!("sess-{}", j);
 
-                let res = ask!(ac, TestMessage::World(key, _), Duration::from_secs(5));
+                    let res = ask!(ac, TestMessage::World(key, _), Duration::from_secs(5));
 
-                if let Err(err) = res {
-                    println!("err = {}", err);
+                    if let Err(err) = res {
+                        println!("err = {}", err);
+                    }
                 }
             }
         });
@@ -176,14 +177,22 @@ async fn main() {
 
     let elapsed = end - start;
 
+    let total_message = num_cli * total_actor * num_message_per_actor;
     println!(
-        "actor ask : elapsed = {:?}, tps =  {}",
+        "actor ask : total = {}, elapsed = {:?}, tps =  {}",
+        total_message,
         elapsed,
-        num_cli as f64 * count as f64 / elapsed.as_secs_f64()
+        total_message as f64 / elapsed.as_secs_f64()
     );
 
     // let metrics = runtime_monitor.intervals();
     // println!("Metrics = {:?}", metrics);
 
     //tokio::time::sleep(Duration::from_secs(1)).await;
+}
+
+#[tokio::main]
+async fn main() {
+    bench().await;
+    println!("end bench");
 }
