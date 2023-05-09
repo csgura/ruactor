@@ -1,6 +1,6 @@
 use std::{
     borrow::Cow,
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     sync::Arc,
     task::Context,
     time::{Duration, Instant},
@@ -27,8 +27,8 @@ pub(crate) enum SuspendReason {
 }
 
 pub struct ActorCell<T: 'static + Send> {
-    pub(crate) stash: Vec<T>,
-    pub(crate) unstashed: Vec<T>,
+    pub(crate) stash: VecDeque<T>,
+    pub(crate) unstashed: VecDeque<T>,
     pub(crate) timer: Timer,
     pub(crate) childrens: HashMap<String, ChildContainer>,
     pub(crate) receive_timeout: Option<Duration>,
@@ -169,12 +169,12 @@ impl<T: 'static + Send> ActorContext<T> {
     }
 
     pub fn stash(&mut self, message: T) {
-        self.cell.stash.push(message);
+        self.cell.stash.push_back(message);
     }
 
     pub fn unstash_all(&mut self) {
-        while let Some(msg) = self.cell.stash.pop() {
-            self.cell.unstashed.push(msg);
+        while let Some(msg) = self.cell.stash.pop_front() {
+            self.cell.unstashed.push_back(msg);
         }
     }
 
