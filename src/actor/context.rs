@@ -12,7 +12,7 @@ use crate::{Actor, Props};
 
 use super::{
     dispatcher::TimerMessage, ActorRef, ChildContainer, InternalMessage, Mailbox, Message,
-    ParentRef, Timer,
+    ParentRef, Scheduled, Timer,
 };
 
 pub struct ActorContext<T: 'static + Send> {
@@ -32,6 +32,7 @@ pub struct ActorCell<T: 'static + Send> {
     pub(crate) timer: Timer,
     pub(crate) childrens: HashMap<String, ChildContainer>,
     pub(crate) receive_timeout: Option<Duration>,
+    pub(crate) scheduled_receive_timeout: Option<Scheduled>,
     pub(crate) timer_gen: u32,
     pub(crate) next_name_offset: usize,
     pub(crate) suspend_reason: Option<SuspendReason>,
@@ -45,6 +46,7 @@ impl<T: 'static + Send> Default for ActorCell<T> {
             timer: Default::default(),
             childrens: Default::default(),
             receive_timeout: Default::default(),
+            scheduled_receive_timeout: None,
             timer_gen: Default::default(),
             next_name_offset: 0,
             suspend_reason: None,
@@ -113,22 +115,24 @@ impl<T: 'static + Send> ActorContext<T> {
 
         let gen = self.next_timer_gen();
 
+        let self_ref: ActorRef<T> = self.self_ref.clone();
+
+        let nc = name.clone();
+        let scheduled = self.self_ref.mbox.scheduler.after_func(d, move || {
+            self_ref.send(Message::Timer(nc, gen, t));
+        });
+
         self.cell
             .timer
             .list
-            .insert(name.clone(), TimerMessage { gen: gen });
+            .insert(name, TimerMessage { gen, scheduled });
 
-        let self_ref = self.self_ref.clone();
         // self.handle.spawn(async move {
         //     let s = tokio::time::sleep(d);
         //     s.await;
 
         //     self_ref.send(Message::Timer(name, gen, t));
         // });
-
-        self.self_ref.mbox.scheduler.after_func(d, move || {
-            self_ref.send(Message::Timer(name, gen, t));
-        })
     }
 
     pub fn cancel_timer<S>(&mut self, name: S)
@@ -146,6 +150,7 @@ impl<T: 'static + Send> ActorContext<T> {
 
     pub fn cancel_receive_timeout(&mut self) {
         self.cell.receive_timeout = None;
+        self.cell.scheduled_receive_timeout = None;
     }
 
     pub(crate) fn schedule_receive_timeout(&mut self, d: Duration) {
@@ -163,9 +168,10 @@ impl<T: 'static + Send> ActorContext<T> {
         let self_ref = self.self_ref.clone();
         let tmout = Instant::now() + d;
 
-        self.self_ref.mbox.scheduler.after_func(d, move || {
-            self_ref.send(Message::ReceiveTimeout(tmout));
-        })
+        self.cell.scheduled_receive_timeout =
+            Some(self.self_ref.mbox.scheduler.after_func(d, move || {
+                self_ref.send(Message::ReceiveTimeout(tmout));
+            }));
     }
 
     pub fn stash(&mut self, message: T) {

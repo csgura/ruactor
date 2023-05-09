@@ -11,6 +11,7 @@ use super::Actor;
 use super::ActorRef;
 use super::AutoMessage;
 use super::ParentRef;
+use super::Scheduled;
 
 use super::context::SuspendReason;
 use super::mailbox::CrossbeamSegQueue;
@@ -19,8 +20,10 @@ use super::Message;
 use crate::system::PropDyn;
 use crate::ReplyTo;
 
+#[allow(dead_code)]
 pub struct TimerMessage {
     pub(crate) gen: u32,
+    pub(crate) scheduled: Scheduled,
 }
 
 pub struct Timer {
