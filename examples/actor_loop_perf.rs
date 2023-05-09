@@ -101,7 +101,10 @@ async fn main() {
     let asys = ActorSystem::new("app");
 
     let actor_ref = asys
-        .create_actor("test", props_from_clone(TestActor {}))
+        .create_actor(
+            "test",
+            props_from_clone(TestActor {}).with_throughput(count + 1),
+        )
         .expect("failed");
 
     // bulk actor loop
@@ -153,7 +156,10 @@ async fn main() {
     );
 
     let actor_ref = asys
-        .create_actor("main", props_from_clone(MainActor { bounded: false }))
+        .create_actor(
+            "main",
+            props_from_clone(MainActor { bounded: false }).with_throughput(count + 1),
+        )
         .expect("failed");
 
     // main actor wait

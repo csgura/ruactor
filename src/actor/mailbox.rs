@@ -155,7 +155,6 @@ pub struct Mailbox<T: 'static + Send> {
     pub(crate) handle: tokio::runtime::Handle,
     pub(crate) pool: Arc<ThreadPool>,
     pub(crate) dedicated_runtime: Option<tokio::runtime::Runtime>,
-    pub(crate) child_runtime: Option<tokio::runtime::Runtime>,
     pub(crate) scheduler: ScheduleSender,
 }
 
@@ -167,28 +166,8 @@ impl<T: 'static + Send> Drop for Mailbox<T> {
                 drop(runtime);
             })
         }
-
-        let runtime = self.child_runtime.take();
-        if let Some(runtime) = runtime {
-            self.pool.install(move || {
-                drop(runtime);
-            })
-        }
     }
 }
-
-// impl<T: 'static + Send> Clone for Mailbox<T> {
-//     fn clone(&self) -> Self {
-//         Self {
-//             internal_queue: SegQueue::new(),
-//             message_queue: SegQueue::new(),
-//             running: self.running.clone(),
-//             terminated: self.terminated.clone(),
-//             dispatcher: self.dispatcher.clone(),
-//             handle: self.handle.clone(),
-//         }
-//     }
-// }
 
 pub(crate) async fn receive<T: 'static + Send>(self_ref: ActorRef<T>) {
     let mbox = self_ref.mbox.as_ref();
@@ -250,27 +229,24 @@ impl<T: 'static + Send> Mailbox<T> {
             watcher: Default::default(),
         };
 
-        let dedicated_runtime = dedicated_thread.and_then(|_| {
-            tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .ok()
-        });
+        let (dedicated_runtime, actor_handle) = if let Some(nworker) = dedicated_thread {
+            if nworker > 1 {
+                let nworker = std::cmp::max(2, nworker);
 
-        let (child_runtime, actor_handle) = if let Some(nworker) = dedicated_thread {
-            let nworker = std::cmp::max(2, nworker);
-
-            let runtime = tokio::runtime::Builder::new_multi_thread()
-                .thread_name(path.to_string())
-                .worker_threads(nworker)
-                .enable_all()
-                .build()
-                .ok();
-            let handle = runtime
-                .as_ref()
-                .map(|x| x.handle().clone())
-                .unwrap_or(handle);
-            (runtime, handle)
+                let runtime = tokio::runtime::Builder::new_multi_thread()
+                    .thread_name(path.to_string())
+                    .worker_threads(nworker)
+                    .enable_all()
+                    .build()
+                    .ok();
+                let handle = runtime
+                    .as_ref()
+                    .map(|x| x.handle().clone())
+                    .unwrap_or(handle);
+                (runtime, handle)
+            } else {
+                (None, handle)
+            }
         } else {
             (None, handle)
         };
@@ -285,7 +261,6 @@ impl<T: 'static + Send> Mailbox<T> {
             terminated: false.into(),
             handle: actor_handle,
             dedicated_runtime: dedicated_runtime,
-            child_runtime,
             pool: pool.clone(),
             scheduler: scheduler,
         };
@@ -312,19 +287,22 @@ impl<T: 'static + Send> Mailbox<T> {
             self.running
                 .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
         {
-            if let Some(runtime) = &self.dedicated_runtime {
-                let handle = runtime.handle().clone();
+            self.handle.spawn(receive(self_ref));
 
-                self.pool.spawn(move || {
-                    let sc = self_ref.clone();
-                    //let _guard = handle.enter();
-                    handle.block_on(async move {
-                        receive(sc).await;
-                    });
-                })
-            } else {
-                self.handle.spawn(async move { receive(self_ref).await });
-            }
+            // if let Some(runtime) = &self.dedicated_runtime {
+            //     //let handle = runtime.handle().clone();
+            //     let handle = self.handle.clone();
+
+            //     self.pool.spawn(move || {
+            //         //println!("start {}", self_ref);
+            //         let sc = self_ref.clone();
+            //         let _guard = handle.enter();
+            //         let f = receive(sc);
+            //         spawn(f)
+            //     })
+            // } else {
+            //     self.handle.spawn(receive(self_ref));
+            // }
         }
     }
 

@@ -296,11 +296,6 @@ impl<T: 'static + Send> Dispatcher<T> {
 
             return;
         }
-        let _guard = if self_ref.mbox.dedicated_runtime.is_some() {
-            Some(self_ref.mbox.handle.enter())
-        } else {
-            None
-        };
 
         self.create_context(&self_ref);
 
@@ -319,10 +314,7 @@ impl<T: 'static + Send> Dispatcher<T> {
             count += 1;
 
             if count >= throuthput {
-                count = 0;
-                if self_ref.mbox.dedicated_runtime.is_none() {
-                    tokio::task::yield_now().await;
-                }
+                break;
             }
         }
     }
