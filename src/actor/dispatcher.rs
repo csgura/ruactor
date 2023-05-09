@@ -116,6 +116,7 @@ impl<T: 'static + Send> Dispatcher<T> {
                 let context: &mut ActorContext<T> = self.context.as_mut().expect("must");
 
                 if context.cell.childrens.len() > 0 {
+                    //println!("actor {} start terminating children", self_ref);
                     context.cell.suspend_reason = Some(SuspendReason::ChildrenTermination);
 
                     context.cell.childrens.iter().for_each(|c| {
@@ -132,6 +133,15 @@ impl<T: 'static + Send> Dispatcher<T> {
 
                 context.cell.childrens.remove(&key);
 
+                // if context.cell.suspend_reason.is_some() {
+                //     if context.cell.childrens.len() % 10000 == 0 {
+                //         println!(
+                //             "actor {} children remains {}",
+                //             self_ref,
+                //             context.cell.childrens.len()
+                //         );
+                //     }
+                // }
                 if context.cell.suspend_reason.is_some() && context.cell.childrens.len() == 0 {
                     context.cell.suspend_reason = None;
                     self.terminate(self_ref);

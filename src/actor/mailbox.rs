@@ -13,7 +13,7 @@ use tokio::sync::Mutex;
 
 use crate::{Actor, ActorPath, Props, PropsOption};
 
-use super::{ActorRef, Dispatcher, InternalMessage, Message, ParentRef, PropWrap, Scheduler};
+use super::{ActorRef, Dispatcher, InternalMessage, Message, ParentRef, PropWrap, ScheduleSender};
 
 #[allow(dead_code)]
 pub(crate) struct TokioChannelQueue<T: 'static + Send> {
@@ -156,7 +156,7 @@ pub struct Mailbox<T: 'static + Send> {
     pub(crate) pool: Arc<ThreadPool>,
     pub(crate) dedicated_runtime: Option<tokio::runtime::Runtime>,
     pub(crate) child_runtime: Option<tokio::runtime::Runtime>,
-    pub(crate) scheduler: Arc<Scheduler>,
+    pub(crate) scheduler: ScheduleSender,
 }
 
 impl<T: 'static + Send> Drop for Mailbox<T> {
@@ -218,7 +218,7 @@ impl<T: 'static + Send> Mailbox<T> {
         parent: Option<Box<dyn ParentRef>>,
         pool: Arc<ThreadPool>,
         handle: tokio::runtime::Handle,
-        scheduler: Arc<Scheduler>,
+        scheduler: ScheduleSender,
     ) -> Mailbox<T>
     where
         P: Props<A>,

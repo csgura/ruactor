@@ -255,6 +255,24 @@ enum SchedulerMessage {
 }
 
 #[derive(Clone)]
+pub(crate) struct ScheduleSender {
+    queue: Arc<SegQueue<SchedulerMessage>>,
+}
+
+impl ScheduleSender {
+    pub(crate) fn after_func(&self, d: Duration, f: impl FnOnce() + 'static + Send) -> Scheduled {
+        let cancelled = Arc::new(AtomicBool::new(false));
+
+        self.queue.push(SchedulerMessage::Task(SchedulerTask {
+            event_time: Instant::now() + d,
+            action: Box::new(f),
+            cancelled: cancelled.clone(),
+        }));
+
+        Scheduled { cancelled }
+    }
+}
+
 pub struct Scheduler {
     queue: Arc<SegQueue<SchedulerMessage>>,
 }
@@ -276,17 +294,22 @@ impl Drop for Scheduled {
 }
 
 impl Scheduler {
-    pub(crate) fn after_func(&self, d: Duration, f: impl FnOnce() + 'static + Send) -> Scheduled {
-        let cancelled = Arc::new(AtomicBool::new(false));
-
-        self.queue.push(SchedulerMessage::Task(SchedulerTask {
-            event_time: Instant::now() + d,
-            action: Box::new(f),
-            cancelled: cancelled.clone(),
-        }));
-
-        Scheduled { cancelled }
+    pub(crate) fn sender(&self) -> ScheduleSender {
+        ScheduleSender {
+            queue: self.queue.clone(),
+        }
     }
+    // pub(crate) fn after_func(&self, d: Duration, f: impl FnOnce() + 'static + Send) -> Scheduled {
+    //     let cancelled = Arc::new(AtomicBool::new(false));
+
+    //     self.queue.push(SchedulerMessage::Task(SchedulerTask {
+    //         event_time: Instant::now() + d,
+    //         action: Box::new(f),
+    //         cancelled: cancelled.clone(),
+    //     }));
+
+    //     Scheduled { cancelled }
+    // }
 
     pub(crate) fn new() -> Self {
         Scheduler {
@@ -303,31 +326,46 @@ impl Scheduler {
                 let mut bheap: BinaryHeap<SchedulerTask> = BinaryHeap::new();
 
                 loop {
+                    let mut scheduled = 0;
                     while let Some(msg) = queue.pop() {
                         match msg {
                             SchedulerMessage::Close => {
+                                //println!("scheduler stop, remain = {}", bheap.len());
                                 return;
                             }
                             SchedulerMessage::Task(task) => {
                                 if task.is_active() {
                                     bheap.push(task);
+                                    scheduled = scheduled + 1;
                                 }
                             }
                         }
                     }
+                    // if scheduled > 0 {
+                    //     println!("{} scheduled", scheduled);
+                    // }
 
                     let now = Instant::now();
 
+                    let mut fire = 0;
+                    let mut cancelled = 0;
                     while let Some(task) = bheap.pop() {
                         if task.is_active() {
                             if task.event_time < now {
+                                //println!("call action");
+                                fire = fire + 1;
                                 (task.action)()
                             } else {
                                 bheap.push(task);
                                 break;
                             }
+                        } else {
+                            cancelled = cancelled + 1;
                         }
                     }
+                    // if fire > 0 {
+                    //     println!("{} fired, {} cancelled", fire, cancelled);
+                    // }
 
                     if queue.len() == 0 {
                         std::thread::sleep(Duration::from_millis(1));
