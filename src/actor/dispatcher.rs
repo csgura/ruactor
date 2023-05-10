@@ -55,7 +55,15 @@ impl<T: 'static + Send> Dispatcher<T> {
             self.context = Some(ActorContext {
                 self_ref: self_ref.clone(),
                 actor: None,
-                cell: Default::default(),
+                stash: Default::default(),
+                unstashed: Default::default(),
+                timer: Default::default(),
+                childrens: Default::default(),
+                receive_timeout: Default::default(),
+                scheduled_receive_timeout: None,
+                timer_gen: Default::default(),
+                next_name_offset: 0,
+                suspend_reason: None,
                 handle: self_ref.mbox.handle.clone(),
             })
         }
@@ -116,11 +124,11 @@ impl<T: 'static + Send> Dispatcher<T> {
                 self_ref.mbox.close();
                 let context: &mut ActorContext<T> = self.context.as_mut().expect("must");
 
-                if context.cell.childrens.len() > 0 {
+                if context.childrens.len() > 0 {
                     //println!("actor {} start terminating children", self_ref);
-                    context.cell.suspend_reason = Some(SuspendReason::ChildrenTermination);
+                    context.suspend_reason = Some(SuspendReason::ChildrenTermination);
 
-                    context.cell.childrens.iter().for_each(|c| {
+                    context.childrens.iter().for_each(|c| {
                         c.1.stop_ref.stop();
                     });
                 } else {
@@ -132,19 +140,19 @@ impl<T: 'static + Send> Dispatcher<T> {
 
                 let context: &mut ActorContext<T> = self.context.as_mut().expect("must");
 
-                context.cell.childrens.remove(&key);
+                context.childrens.remove(&key);
 
-                // if context.cell.suspend_reason.is_some() {
-                //     if context.cell.childrens.len() % 10000 == 0 {
+                // if context.suspend_reason.is_some() {
+                //     if context.childrens.len() % 10000 == 0 {
                 //         println!(
                 //             "actor {} children remains {}",
                 //             self_ref,
-                //             context.cell.childrens.len()
+                //             context.childrens.len()
                 //         );
                 //     }
                 // }
-                if context.cell.suspend_reason.is_some() && context.cell.childrens.len() == 0 {
-                    context.cell.suspend_reason = None;
+                if context.suspend_reason.is_some() && context.childrens.len() == 0 {
+                    context.suspend_reason = None;
                     self.terminate(self_ref);
                 }
             }
@@ -157,18 +165,18 @@ impl<T: 'static + Send> Dispatcher<T> {
             let context = self.context.as_mut().expect("must");
             match message {
                 Message::User(msg) => {
-                    if context.cell.receive_timeout.is_some() {
+                    if context.receive_timeout.is_some() {
                         self.last_message_timestamp = Instant::now();
                     }
 
                     actor.on_message_async(context, msg).await;
                 }
                 Message::Timer(key, gen, msg) => {
-                    if context.cell.receive_timeout.is_some() {
+                    if context.receive_timeout.is_some() {
                         self.last_message_timestamp = Instant::now();
                     }
 
-                    let signal = match context.cell.timer.list.get(&key) {
+                    let signal = match context.timer.list.get(&key) {
                         Some(info) if info.gen == gen => true,
                         _ => false,
                     };
@@ -181,7 +189,7 @@ impl<T: 'static + Send> Dispatcher<T> {
                 Message::ReceiveTimeout(exp) => {
                     let num_msg = self_ref.mbox.num_user_message();
 
-                    if let Some(tmout) = context.cell.receive_timeout {
+                    if let Some(tmout) = context.receive_timeout {
                         if num_msg == 0 {
                             if exp > self.last_message_timestamp {
                                 if exp - self.last_message_timestamp >= tmout {
@@ -231,7 +239,7 @@ impl<T: 'static + Send> Dispatcher<T> {
     }
 
     // fn take_childrens(&mut self, context: &mut ActorContext<T>) -> HashMap<String, ChildContainer> {
-    //     let child = replace(&mut context.cell.childrens, Default::default());
+    //     let child = replace(&mut context.childrens, Default::default());
     //     child
     // }
 
@@ -244,7 +252,7 @@ impl<T: 'static + Send> Dispatcher<T> {
     fn num_total_message(&self, self_ref: &ActorRef<T>, context: &mut ActorContext<T>) -> usize {
         self.num_internal_message(self_ref)
             + self_ref.mbox.message_queue.len()
-            + context.cell.unstashed.len()
+            + context.unstashed.len()
     }
 
     fn pop_internal_message(&mut self, self_ref: &ActorRef<T>) -> Option<InternalMessage> {
@@ -273,7 +281,7 @@ impl<T: 'static + Send> Dispatcher<T> {
 
         let context: &mut ActorContext<T> = self.context.as_mut().expect("must");
 
-        if let Some(msg) = context.cell.unstashed.pop_front() {
+        if let Some(msg) = context.unstashed.pop_front() {
             return Some(Message::User(msg));
         }
 

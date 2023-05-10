@@ -18,15 +18,7 @@ use super::{
 pub struct ActorContext<T: 'static + Send> {
     pub(crate) self_ref: ActorRef<T>,
     pub(crate) actor: Option<Box<dyn Actor<Message = T>>>,
-    pub(crate) cell: ActorCell<T>,
     pub(crate) handle: tokio::runtime::Handle,
-}
-
-pub(crate) enum SuspendReason {
-    ChildrenTermination,
-}
-
-pub struct ActorCell<T: 'static + Send> {
     pub(crate) stash: VecDeque<T>,
     pub(crate) unstashed: VecDeque<T>,
     pub(crate) timer: Timer,
@@ -38,21 +30,25 @@ pub struct ActorCell<T: 'static + Send> {
     pub(crate) suspend_reason: Option<SuspendReason>,
 }
 
-impl<T: 'static + Send> Default for ActorCell<T> {
-    fn default() -> Self {
-        Self {
-            stash: Default::default(),
-            unstashed: Default::default(),
-            timer: Default::default(),
-            childrens: Default::default(),
-            receive_timeout: Default::default(),
-            scheduled_receive_timeout: None,
-            timer_gen: Default::default(),
-            next_name_offset: 0,
-            suspend_reason: None,
-        }
-    }
+pub(crate) enum SuspendReason {
+    ChildrenTermination,
 }
+
+// impl<T: 'static + Send> Default for ActorCell<T> {
+//     fn default() -> Self {
+//         Self {
+//             stash: Default::default(),
+//             unstashed: Default::default(),
+//             timer: Default::default(),
+//             childrens: Default::default(),
+//             receive_timeout: Default::default(),
+//             scheduled_receive_timeout: None,
+//             timer_gen: Default::default(),
+//             next_name_offset: 0,
+//             suspend_reason: None,
+//         }
+//     }
+// }
 
 const BASE64CHARS: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+~";
 
@@ -98,11 +94,11 @@ impl<T: 'static + Send> ActorContext<T> {
     }
 
     fn next_timer_gen(&mut self) -> u32 {
-        let ret = self.cell.timer_gen;
+        let ret = self.timer_gen;
 
-        self.cell.timer_gen = match self.cell.timer_gen {
+        self.timer_gen = match self.timer_gen {
             u32::MAX => 0,
-            _ => self.cell.timer_gen + 1,
+            _ => self.timer_gen + 1,
         };
 
         ret
@@ -122,8 +118,7 @@ impl<T: 'static + Send> ActorContext<T> {
             self_ref.send(Message::Timer(nc, gen, t));
         });
 
-        self.cell
-            .timer
+        self.timer
             .list
             .insert(name, TimerMessage { gen, scheduled });
 
@@ -140,17 +135,17 @@ impl<T: 'static + Send> ActorContext<T> {
         S: Into<Cow<'static, str>>,
     {
         let name = name.into();
-        self.cell.timer.list.remove(&name);
+        self.timer.list.remove(&name);
     }
 
     pub fn set_receive_timeout(&mut self, d: Duration) {
-        self.cell.receive_timeout = Some(d);
+        self.receive_timeout = Some(d);
         self.schedule_receive_timeout(d);
     }
 
     pub fn cancel_receive_timeout(&mut self) {
-        self.cell.receive_timeout = None;
-        self.cell.scheduled_receive_timeout = None;
+        self.receive_timeout = None;
+        self.scheduled_receive_timeout = None;
     }
 
     pub(crate) fn schedule_receive_timeout(&mut self, d: Duration) {
@@ -168,25 +163,24 @@ impl<T: 'static + Send> ActorContext<T> {
         let self_ref = self.self_ref.clone();
         let tmout = Instant::now() + d;
 
-        self.cell.scheduled_receive_timeout =
+        self.scheduled_receive_timeout =
             Some(self.self_ref.mbox.scheduler.after_func(d, move || {
                 self_ref.send(Message::ReceiveTimeout(tmout));
             }));
     }
 
     pub fn stash(&mut self, message: T) {
-        self.cell.stash.push_back(message);
+        self.stash.push_back(message);
     }
 
     pub fn unstash_all(&mut self) {
-        while let Some(msg) = self.cell.stash.pop_front() {
-            self.cell.unstashed.push_back(msg);
+        while let Some(msg) = self.stash.pop_front() {
+            self.unstashed.push_back(msg);
         }
     }
 
     pub fn get_child<M: 'static + Send>(&self, name: &str) -> Option<ActorRef<M>> {
         let ret = self
-            .cell
             .childrens
             .get(name)
             .and_then(|any| any.actor_ref.downcast_ref::<ActorRef<M>>().cloned());
@@ -195,8 +189,8 @@ impl<T: 'static + Send> ActorContext<T> {
     }
 
     fn random_name(&mut self) -> String {
-        let num = self.cell.next_name_offset;
-        self.cell.next_name_offset = self.cell.next_name_offset.checked_add(1).unwrap_or(0);
+        let num = self.next_name_offset;
+        self.next_name_offset = self.next_name_offset.checked_add(1).unwrap_or(0);
         base64(num, "$".into())
     }
 
@@ -228,7 +222,7 @@ impl<T: 'static + Send> ActorContext<T> {
 
                 let actor_ref = ActorRef::new(cpath, Arc::new(mbox));
 
-                self.cell.childrens.insert(
+                self.childrens.insert(
                     name,
                     ChildContainer {
                         actor_ref: Box::new(actor_ref.clone()),
@@ -243,7 +237,7 @@ impl<T: 'static + Send> ActorContext<T> {
     }
 
     pub fn num_children(&mut self) -> usize {
-        self.cell.childrens.len()
+        self.childrens.len()
     }
 
     pub fn stop_self(&mut self) {
