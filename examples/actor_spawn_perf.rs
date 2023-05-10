@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 
 use crossbeam::sync::WaitGroup;
-use ruactor::{ask, props_from_clone, Actor, ActorSystem, ReplyTo, SystemMessage};
+use ruactor::{ask, props_from_clone, Actor, ActorSystem, Props, ReplyTo, SystemMessage};
 
 #[allow(dead_code)]
 enum TestMessage {
@@ -70,7 +70,7 @@ impl Actor for WorkingState {
         let self_ref = context.self_ref();
         //self_ref.tell(TestMessage::Done);
 
-        context.spawn(async move {
+        tokio::spawn(async move {
             //tokio::time::sleep(Duration::from_millis(1)).await;
             self_ref.tell(TestMessage::Done);
         });
@@ -146,8 +146,7 @@ async fn bench() {
     let actor_ref = asys
         .create_actor(
             "bounded",
-            props_from_clone(MainActor {}), // .with_dedicated_thread(8)
-                                            //.with_throughput(2000000),
+            props_from_clone(MainActor {}).with_dedicated_thread(8), //.with_throughput(2000000),
         )
         .expect("failed");
 

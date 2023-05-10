@@ -135,6 +135,6 @@ pub async fn benchmark_actor_loop<T: 'static + Send>(actor_ref: ActorRef<T>, bul
         let _ = actor_ref.mbox.message_queue.push(actor::Message::User(m));
     });
 
-    let mut dp = actor_ref.mbox.dispatcher.lock().await;
+    let dp = actor_ref.get_dispatcher();
     dp.actor_loop(actor_ref.clone()).await;
 }

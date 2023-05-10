@@ -117,6 +117,10 @@ impl<T: 'static + Send> ActorRef<T> {
     pub fn path(&self) -> &ActorPath {
         &self.path
     }
+
+    pub(crate) fn get_dispatcher(&self) -> &mut Dispatcher<T> {
+        unsafe { &mut *self.mbox.dispatcher.get() }
+    }
 }
 
 impl<T: 'static + Send> Clone for ActorRef<T> {

@@ -1,4 +1,5 @@
 use std::{
+    cell::UnsafeCell,
     marker::PhantomData,
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -9,7 +10,6 @@ use std::{
 
 use crossbeam::queue::{ArrayQueue, SegQueue};
 use rayon::ThreadPool;
-use tokio::sync::Mutex;
 
 use crate::{Actor, ActorPath, Props, PropsOption};
 
@@ -151,12 +151,14 @@ pub struct Mailbox<T: 'static + Send> {
 
     pub(crate) running: AtomicBool,
     pub(crate) terminated: AtomicBool,
-    pub(crate) dispatcher: Mutex<Dispatcher<T>>,
+    pub(crate) dispatcher: UnsafeCell<Dispatcher<T>>,
     pub(crate) handle: tokio::runtime::Handle,
     pub(crate) pool: Arc<ThreadPool>,
     pub(crate) dedicated_runtime: Option<tokio::runtime::Runtime>,
     pub(crate) scheduler: ScheduleSender,
 }
+
+unsafe impl<T: 'static + Send> Sync for Mailbox<T> {}
 
 impl<T: 'static + Send> Drop for Mailbox<T> {
     fn drop(&mut self) {
@@ -172,20 +174,18 @@ impl<T: 'static + Send> Drop for Mailbox<T> {
 pub(crate) async fn receive<T: 'static + Send>(self_ref: ActorRef<T>) {
     let mbox = self_ref.mbox.as_ref();
 
-    if let Ok(mut dispatcher) = mbox.dispatcher.try_lock() {
-        dispatcher.actor_loop(self_ref.clone()).await;
-        drop(dispatcher);
+    let dispatcher = self_ref.get_dispatcher();
+    dispatcher.actor_loop(self_ref.clone()).await;
 
-        mbox.running.store(false, Ordering::Release);
+    mbox.running.store(false, Ordering::Release);
 
-        let num_msg = mbox.num_user_message();
-        if num_msg > 0 && !mbox.is_terminated() {
+    let num_msg = mbox.num_user_message();
+    if num_msg > 0 && !mbox.is_terminated() {
+        mbox.schedule(self_ref.clone());
+    } else {
+        let num_sys_msg = mbox.num_internal_message();
+        if num_sys_msg > 0 {
             mbox.schedule(self_ref.clone());
-        } else {
-            let num_sys_msg = mbox.num_internal_message();
-            if num_sys_msg > 0 {
-                mbox.schedule(self_ref.clone());
-            }
         }
     }
 }
@@ -254,7 +254,7 @@ impl<T: 'static + Send> Mailbox<T> {
         let mbox = Mailbox {
             option,
             internal_queue: SegQueue::new(),
-            dispatcher: Mutex::new(dispatcher),
+            dispatcher: UnsafeCell::new(dispatcher),
             //message_queue: SegQueue::new(),
             message_queue: message_sender,
             running: false.into(),
